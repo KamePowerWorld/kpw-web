@@ -14,9 +14,9 @@ on:
         type: number
     secrets:
       CLOUDFLARE_API_TOKEN:
-        required: true
+        required: false
       CLOUDFLARE_ACCOUNT_ID:
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -25,6 +25,9 @@ permissions:
 jobs:
   preview:
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Check out trusted website code
         uses: actions/checkout@v4
@@ -50,6 +53,7 @@ jobs:
         env:
           KPW_DOCS_DIR: ${{ github.workspace }}/docs
       - name: Upload preview version
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
         id: upload
         shell: bash
         run: |
@@ -59,10 +63,11 @@ jobs:
           test -n "$preview_url"
           echo "url=$preview_url" >> "$GITHUB_OUTPUT"
         working-directory: web
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Comment preview URL
+        if: steps.upload.outcome == 'success'
         run: gh pr comment "${{ inputs.pull-request }}" --repo "$GITHUB_REPOSITORY" --body "⚡ [サイトプレビュー](${{ steps.upload.outputs.url }})"
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Report pending Cloudflare setup
+        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
+        run: echo "Preview build passed; upload is waiting for Cloudflare repository secrets."
