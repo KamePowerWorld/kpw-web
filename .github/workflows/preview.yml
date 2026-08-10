@@ -1,0 +1,68 @@
+name: Preview documentation
+
+on:
+  workflow_call:
+    inputs:
+      docs-repository:
+        required: true
+        type: string
+      docs-ref:
+        required: true
+        type: string
+      pull-request:
+        required: true
+        type: number
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted website code
+        uses: actions/checkout@v4
+        with:
+          repository: KamePowerWorld/kpw-web
+          ref: master
+          path: web
+      - name: Check out proposed documentation as data only
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.docs-repository }}
+          ref: ${{ inputs.docs-ref }}
+          path: docs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+        env:
+          KPW_DOCS_DIR: ${{ github.workspace }}/docs
+      - name: Upload preview version
+        id: upload
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler versions upload --config dist/server/wrangler.json --preview-alias "pr-${{ inputs.pull-request }}" | tee upload.log
+          preview_url=$(grep -Eo 'https://[^[:space:]]+workers.dev' upload.log | tail -1)
+          test -n "$preview_url"
+          echo "url=$preview_url" >> "$GITHUB_OUTPUT"
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Comment preview URL
+        run: gh pr comment "${{ inputs.pull-request }}" --repo "$GITHUB_REPOSITORY" --body "⚡ [サイトプレビュー](${{ steps.upload.outputs.url }})"
+        env:
+          GH_TOKEN: ${{ github.token }}

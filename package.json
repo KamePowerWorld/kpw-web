@@ -1,0 +1,44 @@
+{
+  "name": "@kamepowerworld/kpw-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "sync:docs": "node scripts/sync-docs.mjs",
+    "predev": "npm run sync:docs",
+    "dev": "astro dev --host 0.0.0.0",
+    "prebuild": "npm run sync:docs",
+    "build": "astro build",
+    "preview": "wrangler dev --config dist/server/wrangler.json",
+    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
+    "check": "npm run sync:docs && astro check",
+    "test": "npm run check && npm run build && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "14.2.0",
+    "@astrojs/react": "6.0.2",
+    "@milkdown/crepe": "7.22.0",
+    "@milkdown/react": "7.22.0",
+    "astro": "7.2.0",
+    "dompurify": "3.4.13",
+    "marked": "17.0.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "sanitize-html": "2.17.6",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.6",
+    "@cloudflare/workers-types": "5.20260810.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/sanitize-html": "2.16.0",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3",
+    "wrangler": "4.120.0"
+  }
+}

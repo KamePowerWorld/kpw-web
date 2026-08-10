@@ -1,0 +1,81 @@
+---
+import type { DocPage } from "../lib/content";
+import { logoDataUrl, mascotDataUrl } from "../lib/brand-assets";
+
+interface Props {
+  page: DocPage;
+  pages: DocPage[];
+}
+
+const { page, pages } = Astro.props;
+const firstHeading = page.headings[0]?.id ?? "content";
+const isLifeServer = page.slug === "2026-poikatsu";
+---
+
+<main>
+  <div class="top-strip" aria-hidden="true"></div>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="かめぱわぁ〜るど ガイド トップ">
+      <img src={logoDataUrl} alt="かめぱわぁ〜るど" />
+      <span>みんなのガイド</span>
+    </a>
+    <nav class="header-links" aria-label="サイト内リンク">
+      {pages.slice(0, 3).map((item) => (
+        <a class={item.slug === page.slug ? "active" : ""} href={item.slug === "guide" ? "/" : `/${item.slug}/`}>
+          {item.data.title.replace("かめぱわぁ〜るど ", "")}
+        </a>
+      ))}
+      <a class="edit-link" href={`/editor?path=${encodeURIComponent(page.filePath)}`}>編集</a>
+    </nav>
+  </header>
+
+  <section class:list={["hero", { "hero-2026": isLifeServer }]}>
+    <div class="confetti c1">●</div>
+    <div class="confetti c2">◆</div>
+    <div class="confetti c3">▲</div>
+    <div class="confetti c4">●</div>
+    <div class="hero-copy">
+      <p class="eyebrow">{page.data.eyebrow}</p>
+      <h1>{page.data.title}</h1>
+      <p class="lead">{page.data.heroLead}</p>
+      <a class="hero-button" href={`#${firstHeading}`}>ガイドを見てみる <span>→</span></a>
+    </div>
+    <div class:list={["hero-art", { "hero-poster": Boolean(page.heroImageUrl) }]}>
+      <div class="speech">いっしょに遊ぼ！</div>
+      <img src={page.heroImageUrl ?? mascotDataUrl} alt={page.heroImageUrl ? page.data.title : "かめっち"} />
+    </div>
+  </section>
+
+  <div class="ticker" aria-label={page.data.title}>
+    <div>★ KAMEPOWER WORLD ★ {page.data.title} ★ PLAY ・ CREATE ・ ENJOY ★</div>
+  </div>
+
+  <div class="page-shell">
+    <aside class="sidebar">
+      <p>CONTENTS</p>
+      <nav>
+        {page.headings.map((heading, index) => (
+          <a href={`#${heading.id}`}>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            {heading.text}
+          </a>
+        ))}
+      </nav>
+      <div class="mini-note">
+        <b>EDIT ON GITHUB</b>
+        <span>この本文はみんなで編集できるMarkdownです。</span>
+      </div>
+    </aside>
+
+    <article class="markdown-body notion-article" set:html={page.html}></article>
+  </div>
+
+  <footer>
+    <img src={logoDataUrl} alt="" />
+    <div>
+      <b>かめぱわぁ〜るど</b>
+      <span>みんなでつくる、ちょっと変な遊び場。</span>
+    </div>
+    <p>{page.data.credits}</p>
+  </footer>
+</main>

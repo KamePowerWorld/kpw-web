@@ -1,0 +1,13 @@
+---
+export const prerender = true;
+
+import EditorApp from "../components/EditorApp";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { loadPages } from "../lib/content";
+
+const docs = loadPages({ includeDrafts: true }).map(({ slug, filePath, body, data }) => ({ slug, filePath, body, data }));
+---
+
+<BaseLayout title="ガイドエディター | かめぱわぁ〜るど" description="GitHubとつながるWYSIWYG Markdownエディター" bodyClass="editor-page">
+  <EditorApp client:only="react" initialDocs={docs} />
+</BaseLayout>

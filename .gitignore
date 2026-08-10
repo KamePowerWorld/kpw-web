@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.astro/
+.content/
+src/generated-content/
+public/content/
+.wrangler/
+.dev.vars
+.DS_Store

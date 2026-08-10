@@ -1,0 +1,19 @@
+---
+export const prerender = true;
+
+import GuidePage from "../components/GuidePage.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { loadPages } from "../lib/content";
+
+export function getStaticPaths() {
+  const pages = loadPages().filter((page) => page.slug !== "guide");
+  return pages.map((page) => ({ params: { slug: page.slug }, props: { page } }));
+}
+
+const page = Astro.props.page;
+const pages = loadPages();
+---
+
+<BaseLayout title={`${page.data.title} | かめぱわぁ〜るど`} description={page.data.description}>
+  <GuidePage page={page} pages={pages} />
+</BaseLayout>

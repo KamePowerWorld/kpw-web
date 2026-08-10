@@ -1,0 +1,15 @@
+---
+export const prerender = true;
+
+import GuidePage from "../components/GuidePage.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { loadPage, loadPages } from "../lib/content";
+
+const pages = loadPages();
+const page = loadPage("guide") ?? pages[0];
+if (!page) throw new Error("No published documentation pages were found.");
+---
+
+<BaseLayout title={page.data.title} description={page.data.description}>
+  <GuidePage page={page} pages={pages} />
+</BaseLayout>
