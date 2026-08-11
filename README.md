@@ -2,6 +2,8 @@
 
 かめぱわぁ〜るどガイドのAstroサイト、WYSIWYGエディター、GitHub連携APIです。原稿は [KamePowerWorld/kpw-docs](https://github.com/KamePowerWorld/kpw-docs) で管理します。
 
+本番URL: [https://docs.kamesuta.com](https://docs.kamesuta.com)
+
 ## ローカル開発
 
 `kpw-web`と`kpw-docs`を同じ親ディレクトリへ置きます。

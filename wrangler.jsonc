@@ -4,6 +4,14 @@
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@astrojs/cloudflare/entrypoints/server",
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "docs.kamesuta.com",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS"
