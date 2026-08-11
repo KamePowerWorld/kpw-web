@@ -20,14 +20,14 @@ GitHub Appを作成し、次を設定します。
 - Callback URL: `https://<公開ドメイン>/api/auth/callback`
 - Repository permissions: Metadata read、Contents read and write
 - Installation: `KamePowerWorld/kpw-docs`
-- 外部投稿者が自分のforkへ保存する場合、そのユーザー側にもAppをインストールする
+- 外部投稿者は最初に`kpw-docs`をforkし、そのforkへAppをインストールする
 
 Cloudflareへ`GITHUB_CLIENT_ID`と`GITHUB_CLIENT_SECRET`をSecretとして登録します。ローカルでは`.dev.vars.example`を`.dev.vars`へコピーして値を設定します。
 
 ## Cloudflare
 
-1. `wrangler kv namespace create SESSIONS`と`wrangler kv namespace create SESSIONS --preview`を実行する。
-2. 返されたIDを`wrangler.jsonc`の`SESSIONS`へ設定する。
+1. `wrangler kv namespace create kpw-web-SESSIONS`を実行する。
+2. 返されたIDを`wrangler.jsonc`の`SESSIONS`へ設定する。ローカル開発ではWranglerのローカルKVを使用する。
 3. `wrangler secret put GITHUB_CLIENT_ID`と`wrangler secret put GITHUB_CLIENT_SECRET`を登録する。
 4. GitHub Organization Secretに`CLOUDFLARE_API_TOKEN`と`CLOUDFLARE_ACCOUNT_ID`を登録する。
 5. `npm run deploy`で初回配備する。

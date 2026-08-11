@@ -28,6 +28,11 @@ interface CommitResponse { tree: { sha: string } }
 interface BlobResponse { sha: string }
 interface TreeResponse { sha: string }
 interface CreatedCommit { sha: string; html_url: string }
+interface ForkRepository {
+  full_name: string;
+  parent?: { full_name: string };
+  permissions?: { push?: boolean };
+}
 
 function utf8Base64(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -73,27 +78,24 @@ async function createCommit(options: {
   return commit;
 }
 
-async function ensureFork(token: string, login: string, owner: string, repo: string, branch: string) {
-  let fork: { full_name: string; parent?: { full_name: string } } | null = null;
+async function prepareFork(token: string, login: string, owner: string, repo: string, branch: string) {
+  let fork: ForkRepository;
   try {
-    fork = await githubFetch<{ full_name: string; parent?: { full_name: string } }>(token, `/repos/${login}/${repo}`);
-    if (fork.parent?.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) {
-      throw new GitHubError(409, `${login}/${repo} exists but is not a fork of ${owner}/${repo}.`);
-    }
+    fork = await githubFetch<ForkRepository>(token, `/repos/${login}/${repo}`);
   } catch (error) {
     if (!(error instanceof GitHubError) || error.status !== 404) throw error;
-    await githubFetch(token, `/repos/${owner}/${repo}/forks`, { method: "POST", body: "{}" });
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      try {
-        fork = await githubFetch<{ full_name: string; parent?: { full_name: string } }>(token, `/repos/${login}/${repo}`);
-        break;
-      } catch (pollError) {
-        if (!(pollError instanceof GitHubError) || pollError.status !== 404) throw pollError;
-      }
-    }
+    return { ready: false as const, reason: "fork", actionUrl: `https://github.com/${owner}/${repo}/fork` };
   }
-  if (!fork) throw new GitHubError(503, "GitHub is still creating the fork. Try saving again shortly.");
+  if (fork.parent?.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) {
+    throw new GitHubError(409, `${login}/${repo} exists but is not a fork of ${owner}/${repo}.`);
+  }
+  if (!fork.permissions?.push) {
+    return {
+      ready: false as const,
+      reason: "installation",
+      actionUrl: "https://github.com/apps/kamepowerworldeditor/installations/new",
+    };
+  }
   try {
     await githubFetch(token, `/repos/${login}/${repo}/merge-upstream`, {
       method: "POST",
@@ -102,6 +104,7 @@ async function ensureFork(token: string, login: string, owner: string, repo: str
   } catch (error) {
     if (!(error instanceof GitHubError) || ![409, 422].includes(error.status)) throw error;
   }
+  return { ready: true as const };
 }
 
 export const POST: APIRoute = async ({ request }) => {
@@ -135,7 +138,13 @@ export const POST: APIRoute = async ({ request }) => {
       return jsonResponse({ mode: "direct", commitUrl: commit.html_url, redirectUrl: `/${input.path.split("/")[1]}/` });
     }
 
-    await ensureFork(session.accessToken, session.user.login, owner, repo, branch);
+    const fork = await prepareFork(session.accessToken, session.user.login, owner, repo, branch);
+    if (!fork.ready) {
+      const error = fork.reason === "fork"
+        ? "最初にGitHubでkpw-docsをforkしてください。下書きはブラウザに保存されています。"
+        : "forkへ書き込むため、GitHub Appを個人アカウントへインストールしてください。";
+      return jsonResponse({ error, actionUrl: fork.actionUrl }, 409);
+    }
     const forkRef = await githubFetch<RefResponse>(session.accessToken, `/repos/${session.user.login}/${repo}/git/ref/heads/${branch}`);
     const editBranch = `editor/${session.user.login}/${Date.now()}`;
     await githubFetch(session.accessToken, `/repos/${session.user.login}/${repo}/git/refs`, {

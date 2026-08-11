@@ -30,7 +30,7 @@ type Session = {
 
 type AssetDraft = { name: string; contentBase64: string; objectUrl: string };
 type ContentResponse = { content: string; baseCommitSha: string; error?: string };
-type SaveResponse = { mode: "direct" | "pull-request"; redirectUrl: string; error?: string };
+type SaveResponse = { mode?: "direct" | "pull-request"; redirectUrl?: string; actionUrl?: string; error?: string };
 
 const emptyData: DocSummary["data"] = {
   title: "",
@@ -208,10 +208,16 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
         }),
       });
       const result = await response.json() as SaveResponse;
-      if (!response.ok) throw new Error(result.error || "保存に失敗しました");
+      if (!response.ok && result.actionUrl) {
+        setStatus(result.error || "GitHubで準備を続けます。下書きはブラウザに保存されています。");
+        window.setTimeout(() => { location.href = result.actionUrl!; }, 900);
+        return;
+      }
+      if (!response.ok || !result.mode || !result.redirectUrl) throw new Error(result.error || "保存に失敗しました");
+      const redirectUrl = result.redirectUrl;
       localStorage.removeItem(draftKey);
       setStatus(result.mode === "direct" ? "masterへ保存しました。公開ビルドが始まります。" : "GitHubのPull Request画面を開きます。");
-      window.setTimeout(() => { location.href = result.redirectUrl; }, 600);
+      window.setTimeout(() => { location.href = redirectUrl; }, 600);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存に失敗しました");
       setSaving(false);

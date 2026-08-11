@@ -11,8 +11,7 @@
   "kv_namespaces": [
     {
       "binding": "SESSIONS",
-      "id": "REPLACE_WITH_PRODUCTION_KV_ID",
-      "preview_id": "REPLACE_WITH_PREVIEW_KV_ID"
+      "id": "650f85c2853c433b91089cf8d1710a6b"
     }
   ],
   "vars": {
