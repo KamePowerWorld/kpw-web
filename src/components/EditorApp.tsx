@@ -24,6 +24,8 @@ type DocSummary = {
 type Session = {
   authenticated: boolean;
   canPush?: boolean;
+  installationReady?: boolean;
+  installationUrl?: string;
   csrfToken?: string;
   user?: { login: string; name: string | null; avatarUrl: string };
 };
@@ -188,6 +190,10 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
 
   const save = async () => {
     if (!session.authenticated) { location.href = "/api/auth/login"; return; }
+    if (session.installationReady === false && session.installationUrl) {
+      location.href = session.installationUrl;
+      return;
+    }
     const finalSlug = slug || toSlug(data.title);
     if (!finalSlug || !data.title || !data.description || !data.heroLead || !data.credits) {
       setStatus("タイトル、slug、説明、リード文、クレジットを入力してください"); return;
@@ -236,7 +242,7 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
           {session.authenticated ? <><img src={session.user?.avatarUrl} alt="" /><span>{session.user?.login}</span></> : <a href="/api/auth/login">GitHubでログイン</a>}
         </div>
         <button className="publish-button" disabled={saving} onClick={save}>
-          {saving ? "保存中…" : session.canPush ? "masterへ反映" : "GitHubで提案"}
+          {saving ? "保存中…" : session.installationReady === false ? "GitHub Appを設定" : session.canPush ? "masterへ反映" : "GitHubで提案"}
         </button>
       </header>
 

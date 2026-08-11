@@ -20,6 +20,34 @@ export interface GitHubSession {
   user: { login: string; name: string | null; avatarUrl: string };
 }
 
+interface GitHubInstallation {
+  id: number;
+  app_slug: string;
+  account?: { login?: string };
+  html_url?: string;
+  repository_selection: "all" | "selected";
+}
+
+export async function getInstallationAccess(token: string, account: string, repo: string) {
+  const response = await githubFetch<{ installations: GitHubInstallation[] }>(token, "/user/installations?per_page=100");
+  const installation = response.installations.find((item) =>
+    item.app_slug === "kamepowerworldeditor"
+    && item.account?.login?.toLowerCase() === account.toLowerCase());
+  const installUrl = "https://github.com/apps/kamepowerworldeditor/installations/new";
+  if (!installation) return { ready: false as const, actionUrl: installUrl };
+  if (installation.repository_selection === "all") {
+    return { ready: true as const, actionUrl: installation.html_url ?? installUrl };
+  }
+  const repositories = await githubFetch<{ repositories: Array<{ name: string }> }>(
+    token,
+    `/user/installations/${installation.id}/repositories?per_page=100`,
+  );
+  return {
+    ready: repositories.repositories.some((item) => item.name.toLowerCase() === repo.toLowerCase()),
+    actionUrl: installation.html_url ?? installUrl,
+  };
+}
+
 export const githubConfig = () => ({
   owner: runtimeEnv.GITHUB_OWNER || "KamePowerWorld",
   repo: runtimeEnv.GITHUB_REPO || "kpw-docs",

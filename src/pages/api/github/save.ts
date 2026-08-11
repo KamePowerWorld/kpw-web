@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   GitHubError,
   assertSameOrigin,
+  getInstallationAccess,
   getSession,
   githubConfig,
   githubFetch,
@@ -89,11 +90,12 @@ async function prepareFork(token: string, login: string, owner: string, repo: st
   if (fork.parent?.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) {
     throw new GitHubError(409, `${login}/${repo} exists but is not a fork of ${owner}/${repo}.`);
   }
-  if (!fork.permissions?.push) {
+  const installation = await getInstallationAccess(token, login, repo);
+  if (!installation.ready) {
     return {
       ready: false as const,
       reason: "installation",
-      actionUrl: "https://github.com/apps/kamepowerworldeditor/installations/new",
+      actionUrl: installation.actionUrl,
     };
   }
   try {
@@ -126,6 +128,13 @@ export const POST: APIRoute = async ({ request }) => {
     const message = `docs: ${input.title}`;
 
     if (repository.permissions?.push) {
+      const installation = await getInstallationAccess(session.accessToken, owner, repo);
+      if (!installation.ready) {
+        return jsonResponse({
+          error: "GitHub AppをKamePowerWorldのkpw-docsへインストールしてください。",
+          actionUrl: installation.actionUrl,
+        }, 403);
+      }
       const commit = await createCommit({
         token: session.accessToken,
         owner,
