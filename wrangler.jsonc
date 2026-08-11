@@ -23,6 +23,7 @@
     }
   ],
   "vars": {
+    "GITHUB_CLIENT_ID": "Iv23ligTB7zFjI7zD2uQ",
     "GITHUB_OWNER": "KamePowerWorld",
     "GITHUB_REPO": "kpw-docs",
     "GITHUB_BRANCH": "master"
