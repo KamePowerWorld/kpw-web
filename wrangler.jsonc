@@ -14,7 +14,8 @@
   ],
   "assets": {
     "directory": "./dist/client",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "html_handling": "force-trailing-slash"
   },
   "kv_namespaces": [
     {
