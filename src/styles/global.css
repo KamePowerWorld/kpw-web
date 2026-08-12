@@ -337,8 +337,11 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .editor-pane, .preview-pane { min-width: 0; height: calc(100vh - 210px); overflow: auto; }
 .editor-pane { background: #fff; border-right: 3px solid var(--line); }
 .milkdown-host { min-height: 100%; }
-.milkdown-host .milkdown { min-height: 100%; padding: 32px 42px 100px; }
-.milkdown-host .ProseMirror { min-height: calc(100vh - 310px); outline: none; }
+.milkdown-host .milkdown { min-height: 100%; padding: 0; }
+.editor-page .milkdown-host .milkdown .ProseMirror {
+  width: 100%; max-width: none; min-height: calc(100vh - 310px); margin: 0;
+  padding: 32px 42px 100px; outline: none;
+}
 .source-editor {
   width: 100%; min-height: 100%; padding: 28px; resize: none; border: 0; outline: none;
   color: #e9ffe5; background: #102c17; font: 14px/1.75 ui-monospace, "SFMono-Regular", Consolas, monospace;
@@ -370,8 +373,10 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
   .editor-pane, .preview-pane { display: none; height: auto; min-height: 68svh; }
   .editor-pane.is-active, .preview-pane.is-active { display: block; }
   .editor-pane { border: 0; }
-  .milkdown-host .milkdown { padding: 18px 14px 90px; }
-  .milkdown-host .ProseMirror { min-height: 64svh; width: 100%; }
+  .milkdown-host .milkdown { padding: 0; }
+  .editor-page .milkdown-host .milkdown .ProseMirror {
+    width: 100%; min-height: 64svh; margin: 0; padding: 18px 16px 100px;
+  }
   .source-editor { display: block; min-height: 68svh; padding: 18px 16px 90px; }
   .preview-pane { padding: 12px; }
   .preview-hero { padding: 20px 18px; }
