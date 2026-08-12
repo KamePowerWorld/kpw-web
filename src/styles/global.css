@@ -431,6 +431,7 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
     box-shadow: 12px 0 28px rgba(16,44,23,.24);
   }
   .page-explorer.open { transform: translateX(0); }
+  .page-explorer .row-actions { display: flex; }
   .explorer-backdrop { position: fixed; z-index: 70; inset: 0; display: block; border: 0; background: rgba(7,30,11,.42); }
   .editor-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .editor-meta label.wide { grid-column: 1 / -1; }

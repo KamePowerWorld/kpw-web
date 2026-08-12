@@ -168,15 +168,16 @@ async function fileToDraft(file: File): Promise<AssetDraft> {
   return { name: file.name.replace(/[^A-Za-z0-9._-]/g, "-"), contentBase64: btoa(binary), mime: file.type };
 }
 
-function SortablePage({ page, selected, dirty, onSelect, onAdd, onRename, onDelete }: {
+function SortablePage({ page, selected, dirty, onSelect, onAdd, onRename, onDelete, onIndent, onOutdent }: {
   page: PageDraft; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void;
+  onIndent: () => void; onOutdent: () => void;
 }) {
   const sortable = useSortable({ id: page.id });
   return <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth } as React.CSSProperties}
     className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""}`}>
     <button className="drag-handle" {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}>⠿</button>
     <button className="page-name" onClick={onSelect}>{dirty && <span className="dirty-dot" aria-label="変更済み">●</span>}{page.data.draft && <span aria-label="まだ非公開">◇</span>}{page.data.title}</button>
-    <div className="row-actions"><button onClick={onAdd} title="子ページを追加">＋</button><button onClick={onRename} title="slugを変更">⋯</button><button onClick={onDelete} title="削除">×</button></div>
+    <div className="row-actions"><button onClick={onOutdent} title="ひとつ外側へ" aria-label="ひとつ外側へ">←</button><button onClick={onIndent} title="ひとつ内側へ" aria-label="ひとつ内側へ">→</button><button onClick={onAdd} title="子ページを追加">＋</button><button onClick={onRename} title="slugを変更">⋯</button><button onClick={onDelete} title="削除">×</button></div>
   </div>;
 }
 
@@ -312,6 +313,24 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     setNavigation({ ...navigation, tree }); setTreeDirty(true); setStatus("ページツリーを変更しました。まとめて保存できます。");
   };
 
+  const indentPage = (page: PageDraft) => {
+    const position = flatTree.findIndex((item) => item.id === page.id);
+    const previous = position > 0 ? flatTree[position - 1] : undefined;
+    if (!previous || previous.id === page.parentId) { setStatus("このページを内側へ移動できる直前のページがありません"); return; }
+    const activeNode = findNode(navigation.tree, page.id);
+    if (!activeNode || containsNode(activeNode, previous.id)) return;
+    const removed = removeNode(navigation.tree, page.id);
+    setNavigation({ ...navigation, tree: appendChild(removed.tree, previous.id, removed.node!) }); setTreeDirty(true);
+    setStatus("ページをひとつ内側へ移動しました");
+  };
+
+  const outdentPage = (page: PageDraft) => {
+    if (!page.parentId) { setStatus("このページはすでに最上位です"); return; }
+    const removed = removeNode(navigation.tree, page.id); if (!removed.node) return;
+    setNavigation({ ...navigation, tree: insertRelative(removed.tree, page.parentId, removed.node, true) }); setTreeDirty(true);
+    setStatus("ページをひとつ外側へ移動しました");
+  };
+
   const addAssets = async (files: FileList | null) => {
     if (!files || !current) return; const additions = await Promise.all([...files].map(fileToDraft));
     updatePage(current.id, (page) => ({ ...page, assets: [...page.assets, ...additions], body: `${page.body.trim()}\n\n${additions.map((asset) => `![${asset.name}](./assets/${asset.name})`).join("\n\n")}\n` }));
@@ -369,7 +388,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
         </button>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={treePages.map((page) => page.id)} strategy={verticalListSortingStrategy}>
-            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => deletePage(page)} />)}</div>
+            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => deletePage(page)} onIndent={() => indentPage(page)} onOutdent={() => outdentPage(page)} />)}</div>
           </SortableContext>
         </DndContext>
         {deletedPages.length > 0 && <div className="deleted-pages"><strong>削除予定</strong>{deletedPages.map((page) => <button key={page.id} onClick={() => undoDelete(page)}><s>{page.data.title}</s><span>取り消す</span></button>)}</div>}
