@@ -34,6 +34,7 @@ type PersistedWorkspace = { pages: PageDraft[]; navigation: Navigation; dirtyIds
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const workspaceStorageKey = "current";
+const lastSavedCommitKey = "kpw-editor:last-saved-commit";
 
 function parseDocument(source: string, slug: string): PageDraft {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -157,6 +158,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const [editorRevision, setEditorRevision] = useState(0);
   const [activePane, setActivePane] = useState<"edit" | "preview">("edit");
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const persistenceEpoch = useRef(0);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   const allowedNavigationIds = pages.filter((page) => page.slug !== "index" && !page.deleted).map((page) => page.id);
@@ -187,6 +189,16 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     void fetch("/api/github/workspace").then(async (response) => {
       const result = await response.json() as WorkspaceResponse; if (!response.ok) throw new Error(result.error); return result;
     }).then((result) => {
+      const lastSavedCommit = localStorage.getItem(lastSavedCommitKey);
+      if (lastSavedCommit === result.baseCommitSha) {
+        persistenceEpoch.current += 1;
+        const remotePages = result.pages.map((item) => parseDocument(item.content, item.slug));
+        const remoteNavigation = parseYaml(result.navigation) as Navigation;
+        setPages(remotePages); setNavigation(normalizeNavigation(remoteNavigation, remotePages.filter((page) => page.slug !== "index").map((page) => page.id)));
+        setDirtyIds(new Set()); setTreeDirty(false); setBaseCommitSha(result.baseCommitSha);
+        localStorage.removeItem(lastSavedCommitKey); void writePersistedWorkspace();
+        setStatus("保存したGitHub上の最新版を読み込みました"); return;
+      }
       if (dirtyIds.size || treeDirty) {
         if (!baseCommitSha) setBaseCommitSha(result.baseCommitSha);
         setStatus("保存済みの編集内容を表示中です。GitHubの最新版は一括保存時に競合確認されます。"); return;
@@ -199,7 +211,9 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
 
   useEffect(() => {
     if (!hydrated) return;
+    const epoch = persistenceEpoch.current;
     const timer = window.setTimeout(() => {
+      if (epoch !== persistenceEpoch.current) return;
       const hasChanges = dirtyIds.size > 0 || treeDirty;
       void writePersistedWorkspace(hasChanges ? { pages, navigation: safeNavigation, dirtyIds: [...dirtyIds], treeDirty, baseCommitSha, selectedId } : undefined);
     }, 300);
@@ -330,8 +344,10 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       if (!response.ok || !result.mode) throw new Error(result.error ?? "保存に失敗しました");
       if (result.mode === "pull-request") { setStatus("GitHubのPull Request作成画面を開きます"); window.setTimeout(() => { location.href = result.redirectUrl!; }, 600); return; }
       const savedPages = pages.filter((page) => !page.deleted).map((page) => ({ ...page, originalSlug: page.slug, isNew: false, assets: [] }));
+      persistenceEpoch.current += 1;
+      if (result.commitSha) localStorage.setItem(lastSavedCommitKey, result.commitSha);
       setPages(savedPages); setDirtyIds(new Set()); setTreeDirty(false); setBaseCommitSha(result.commitSha); await writePersistedWorkspace();
-      setStatus("まとめて保存しました。公開後に「ページを見る」から確認できます。"); setSaving(false);
+      setStatus("GitHubへ保存しました。自動デプロイ完了後に公開サイトへ反映されます。"); setSaving(false);
     } catch (error) { setStatus(error instanceof Error ? error.message : "保存に失敗しました"); setSaving(false); }
   };
 

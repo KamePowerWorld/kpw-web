@@ -36,7 +36,9 @@ test("nested routes render and non-canonical paths redirect", async () => {
   assert.equal(wrongParent.status, 308); assert.equal(wrongParent.headers.get("location"), "/2026-poikatsu?from=old");
   const trailing = await fetch(`${origin}/2026-poikatsu/`, { redirect: "manual" });
   assert.equal(trailing.status, 308); assert.equal(trailing.headers.get("location"), "/2026-poikatsu");
-  assert.equal((await fetch(`${origin}/testtest`)).status, 404);
+  const testSource = readFileSync(`${process.env.KPW_DOCS_DIR ?? "../kpw-docs"}/pages/testtest/index.md`, "utf8");
+  const expectedTestStatus = /^draft:\s*true\s*$/m.test(testSource) ? 404 : 200;
+  assert.equal((await fetch(`${origin}/testtest`)).status, expectedTestStatus);
   const image = await fetch(`${origin}/content/2026-poikatsu/assets/image-2.png`); assert.equal(image.status, 200); assert.match(image.headers.get("content-type") ?? "", /image\/png/);
 });
 

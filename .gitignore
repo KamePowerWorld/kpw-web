@@ -7,3 +7,5 @@ public/content/
 .wrangler/
 .dev.vars
 .DS_Store
+playwright-report/
+test-results/
