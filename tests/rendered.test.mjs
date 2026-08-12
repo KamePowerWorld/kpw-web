@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import test, { after, before } from "node:test";
+import { flattenNavigation, normalizeNavigation, removeNavigationNode } from "../src/lib/navigation.ts";
 
 const port = 43123;
 const origin = `http://127.0.0.1:${port}`;
@@ -49,6 +50,18 @@ test("tree, batch save, slug reuse, and deletion policies are present", () => {
   const editor = readFileSync("src/components/EditorApp.tsx", "utf8"); const save = readFileSync("src/pages/api/github/save.ts", "utf8");
   assert.match(editor, /変更をまとめて保存/); assert.match(editor, /子ページがあるため削除できません/); assert.match(editor, /releaseAlias/); assert.match(editor, /indexedDB/);
   assert.match(save, /sha: null/); assert.match(save, /navigation\.yml/); assert.match(save, /expectedCommitSha/);
+});
+
+test("corrupted browser trees are repaired without multiplying pages", () => {
+  const corrupted = { version: 1, tree: [
+    { id: "a", children: [{ id: "b" }, { id: "b" }, { id: "missing" }] },
+    { id: "a" }, { id: "b" },
+  ] };
+  const repaired = normalizeNavigation(corrupted, ["a", "b", "c"]);
+  assert.deepEqual(flattenNavigation(repaired.tree).map((item) => item.id), ["a", "b", "c"]);
+  const removed = removeNavigationNode(corrupted.tree, "b");
+  assert.equal(removed.node?.id, "b");
+  assert.equal(flattenNavigation(removed.tree).filter((item) => item.id === "b").length, 0);
 });
 
 test("organization spelling and repository split stay canonical", () => {

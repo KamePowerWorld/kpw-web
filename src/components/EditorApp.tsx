@@ -9,11 +9,14 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  appendNavigationChild, containsNavigationNode, findNavigationNode, flattenNavigation,
+  insertNavigationRelative, normalizeNavigation, removeNavigationNode,
+  type Navigation, type NavigationNode,
+} from "../lib/navigation";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
-type NavigationNode = { id: string; children?: NavigationNode[] };
-type Navigation = { version: 1; tree: NavigationNode[] };
 type DocData = { id: string; title: string; draft: boolean; heroLead: string; heroImage?: string; aliases: string[] };
 type DocSummary = {
   id: string; slug: string; filePath: string; body: string; data: DocData;
@@ -76,51 +79,6 @@ function decoratePages(pages: PageDraft[], navigation: Navigation) {
   };
   visit(navigation.tree, undefined, []);
   return copies;
-}
-
-function flattenTree(nodes: NavigationNode[], depth = 0, parentId?: string): Array<{ id: string; depth: number; parentId?: string }> {
-  return nodes.flatMap((node) => [{ id: node.id, depth, parentId }, ...flattenTree(node.children ?? [], depth + 1, node.id)]);
-}
-
-function containsNode(node: NavigationNode, id: string): boolean {
-  return node.id === id || (node.children ?? []).some((child) => containsNode(child, id));
-}
-
-function findNode(nodes: NavigationNode[], id: string): NavigationNode | undefined {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    const nested = findNode(node.children ?? [], id);
-    if (nested) return nested;
-  }
-  return undefined;
-}
-
-function removeNode(nodes: NavigationNode[], id: string): { tree: NavigationNode[]; node?: NavigationNode } {
-  let found: NavigationNode | undefined;
-  const tree: NavigationNode[] = [];
-  for (const item of nodes) {
-    if (item.id === id) { found = item; continue; }
-    const nested = removeNode(item.children ?? [], id);
-    if (nested.node) found = nested.node;
-    tree.push({ ...item, ...(nested.tree.length ? { children: nested.tree } : {}) });
-  }
-  return { tree, node: found };
-}
-
-function insertRelative(nodes: NavigationNode[], targetId: string, node: NavigationNode, after: boolean): NavigationNode[] {
-  const result: NavigationNode[] = [];
-  for (const item of nodes) {
-    if (item.id === targetId && !after) result.push(node);
-    result.push({ ...item, ...(item.children?.length ? { children: insertRelative(item.children, targetId, node, after) } : {}) });
-    if (item.id === targetId && after) result.push(node);
-  }
-  return result;
-}
-
-function appendChild(nodes: NavigationNode[], parentId: string, node: NavigationNode): NavigationNode[] {
-  return nodes.map((item) => item.id === parentId
-    ? { ...item, children: [...(item.children ?? []), node] }
-    : { ...item, ...(item.children?.length ? { children: appendChild(item.children, parentId, node) } : {}) });
 }
 
 function openWorkspaceDb() {
@@ -186,7 +144,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const searchParams = new URLSearchParams(location.search);
   const requestedId = searchParams.get("page") ?? initialPages.find((page) => page.filePath === searchParams.get("path"))?.id;
   const [pages, setPages] = useState<PageDraft[]>(initialPages);
-  const [navigation, setNavigation] = useState<Navigation>(initialNavigation);
+  const [navigation, setNavigation] = useState<Navigation>(() => normalizeNavigation(initialNavigation, initialPages.filter((page) => page.slug !== "index").map((page) => page.id)));
   const [selectedId, setSelectedId] = useState(requestedId ?? initialPages.find((page) => page.slug === "index")?.id ?? initialPages[0]?.id ?? "");
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
   const [treeDirty, setTreeDirty] = useState(false);
@@ -201,9 +159,11 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const [explorerOpen, setExplorerOpen] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
-  const decorated = useMemo(() => decoratePages(pages, navigation), [pages, navigation]);
+  const allowedNavigationIds = pages.filter((page) => page.slug !== "index" && !page.deleted).map((page) => page.id);
+  const safeNavigation = useMemo(() => normalizeNavigation(navigation, allowedNavigationIds), [navigation, pages]);
+  const decorated = useMemo(() => decoratePages(pages, safeNavigation), [pages, safeNavigation]);
   const current = decorated.find((page) => page.id === selectedId && !page.deleted) ?? decorated.find((page) => page.slug === "index" && !page.deleted) ?? decorated.find((page) => !page.deleted);
-  const flatTree = useMemo(() => flattenTree(navigation.tree), [navigation]);
+  const flatTree = useMemo(() => flattenNavigation(safeNavigation.tree), [safeNavigation]);
   const treePages = flatTree.map((entry) => decorated.find((page) => page.id === entry.id)).filter((page): page is PageDraft => Boolean(page && !page.deleted));
   const deletedPages = pages.filter((page) => page.deleted);
 
@@ -212,7 +172,10 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       .then(([nextSession, stored]) => {
         setSession(nextSession);
         if (stored) {
-          setPages(stored.pages); setNavigation(stored.navigation); setDirtyIds(new Set(stored.dirtyIds)); setTreeDirty(stored.treeDirty);
+          const storedPages = [...new Map(stored.pages.map((page) => [page.id, page])).values()];
+          const repairedNavigation = normalizeNavigation(stored.navigation, storedPages.filter((page) => page.slug !== "index" && !page.deleted).map((page) => page.id));
+          const repaired = stringifyYaml(repairedNavigation) !== stringifyYaml(stored.navigation);
+          setPages(storedPages); setNavigation(repairedNavigation); setDirtyIds(new Set(stored.dirtyIds)); setTreeDirty(stored.treeDirty || repaired);
           setBaseCommitSha(stored.baseCommitSha); setSelectedId(stored.selectedId); setStatus("ブラウザに保存された変更内容を復元しました");
         }
         setHydrated(true);
@@ -230,7 +193,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       }
       const remotePages = result.pages.map((item) => parseDocument(item.content, item.slug));
       const remoteNavigation = parseYaml(result.navigation) as Navigation;
-      setPages(remotePages); setNavigation(remoteNavigation); setBaseCommitSha(result.baseCommitSha); setStatus("GitHub上の最新版を読み込みました");
+      setPages(remotePages); setNavigation(normalizeNavigation(remoteNavigation, remotePages.filter((page) => page.slug !== "index").map((page) => page.id))); setBaseCommitSha(result.baseCommitSha); setStatus("GitHub上の最新版を読み込みました");
     }).catch((error) => setStatus(`ローカル内容を表示中：${error instanceof Error ? error.message : "取得に失敗しました"}`));
   }, [hydrated, session.authenticated]);
 
@@ -238,10 +201,10 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       const hasChanges = dirtyIds.size > 0 || treeDirty;
-      void writePersistedWorkspace(hasChanges ? { pages, navigation, dirtyIds: [...dirtyIds], treeDirty, baseCommitSha, selectedId } : undefined);
+      void writePersistedWorkspace(hasChanges ? { pages, navigation: safeNavigation, dirtyIds: [...dirtyIds], treeDirty, baseCommitSha, selectedId } : undefined);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [pages, navigation, dirtyIds, treeDirty, baseCommitSha, selectedId, hydrated]);
+  }, [pages, safeNavigation, dirtyIds, treeDirty, baseCommitSha, selectedId, hydrated]);
 
   const markDirty = (id: string) => setDirtyIds((currentIds) => new Set(currentIds).add(id));
   const updatePage = (id: string, updater: (page: PageDraft) => PageDraft) => {
@@ -273,7 +236,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       body: `# ${title.trim()}\n\nここから書き始めよう。\n`, assets: [], canonicalPath: `/${slug}`, childIds: [], depth: 0, isNew: true,
     };
     setPages((value) => [...value, page]);
-    setNavigation((value) => ({ ...value, tree: parentId ? appendChild(value.tree, parentId, { id }) : [...value.tree, { id }] }));
+    setNavigation((value) => normalizeNavigation({ ...value, tree: parentId ? appendNavigationChild(value.tree, parentId, { id }) : [...value.tree, { id }] }, [...allowedNavigationIds, id]));
     setDirtyIds((ids) => new Set(ids).add(id)); setTreeDirty(true); selectPage(id); setStatus("新しいページを追加しました。まだGitHubには保存されていません。");
   };
 
@@ -292,42 +255,42 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     if (page.childIds.length) { setStatus("子ページがあるため削除できません。先に子ページを移動してください。"); return; }
     if (!window.confirm(`「${page.data.title}」を削除予定にしますか？\n一括保存前なら取り消せます。`)) return;
     setPages((value) => value.map((item) => item.id === page.id ? { ...item, deleted: true } : item));
-    setNavigation((value) => ({ ...value, tree: removeNode(value.tree, page.id).tree }));
+    setNavigation((value) => ({ ...value, tree: removeNavigationNode(value.tree, page.id).tree }));
     setDirtyIds((ids) => new Set(ids).add(page.id)); setTreeDirty(true);
     const index = pages.find((item) => item.slug === "index"); if (index) selectPage(index.id);
   };
 
   const undoDelete = (page: PageDraft) => {
     setPages((value) => value.map((item) => item.id === page.id ? { ...item, deleted: false } : item));
-    setNavigation((value) => ({ ...value, tree: [...value.tree, { id: page.id }] })); setTreeDirty(true); markDirty(page.id);
+    setNavigation((value) => normalizeNavigation({ ...value, tree: [...value.tree, { id: page.id }] }, [...allowedNavigationIds, page.id])); setTreeDirty(true); markDirty(page.id);
   };
 
   const handleDragEnd = ({ active, over, delta }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
-    const activeNode = findNode(navigation.tree, String(active.id));
-    if (activeNode && containsNode(activeNode, String(over.id))) { setStatus("子孫ページの中へは移動できません"); return; }
-    const removed = removeNode(navigation.tree, String(active.id)); if (!removed.node) return;
+    const activeNode = findNavigationNode(safeNavigation.tree, String(active.id));
+    if (activeNode && containsNavigationNode(activeNode, String(over.id))) { setStatus("子孫ページの中へは移動できません"); return; }
+    const removed = removeNavigationNode(safeNavigation.tree, String(active.id)); if (!removed.node) return;
     let tree = removed.tree;
-    if (delta.x > 34) tree = appendChild(tree, String(over.id), removed.node);
-    else tree = insertRelative(tree, String(over.id), removed.node, delta.y > 0);
-    setNavigation({ ...navigation, tree }); setTreeDirty(true); setStatus("ページツリーを変更しました。まとめて保存できます。");
+    if (delta.x > 34) tree = appendNavigationChild(tree, String(over.id), removed.node);
+    else tree = insertNavigationRelative(tree, String(over.id), removed.node, delta.y > 0);
+    setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setTreeDirty(true); setStatus("ページツリーを変更しました。まとめて保存できます。");
   };
 
   const indentPage = (page: PageDraft) => {
     const position = flatTree.findIndex((item) => item.id === page.id);
     const previous = position > 0 ? flatTree[position - 1] : undefined;
     if (!previous || previous.id === page.parentId) { setStatus("このページを内側へ移動できる直前のページがありません"); return; }
-    const activeNode = findNode(navigation.tree, page.id);
-    if (!activeNode || containsNode(activeNode, previous.id)) return;
-    const removed = removeNode(navigation.tree, page.id);
-    setNavigation({ ...navigation, tree: appendChild(removed.tree, previous.id, removed.node!) }); setTreeDirty(true);
+    const activeNode = findNavigationNode(safeNavigation.tree, page.id);
+    if (!activeNode || containsNavigationNode(activeNode, previous.id)) return;
+    const removed = removeNavigationNode(safeNavigation.tree, page.id);
+    setNavigation(normalizeNavigation({ version: 1, tree: appendNavigationChild(removed.tree, previous.id, removed.node!) }, allowedNavigationIds)); setTreeDirty(true);
     setStatus("ページをひとつ内側へ移動しました");
   };
 
   const outdentPage = (page: PageDraft) => {
     if (!page.parentId) { setStatus("このページはすでに最上位です"); return; }
-    const removed = removeNode(navigation.tree, page.id); if (!removed.node) return;
-    setNavigation({ ...navigation, tree: insertRelative(removed.tree, page.parentId, removed.node, true) }); setTreeDirty(true);
+    const removed = removeNavigationNode(safeNavigation.tree, page.id); if (!removed.node) return;
+    setNavigation(normalizeNavigation({ version: 1, tree: insertNavigationRelative(removed.tree, page.parentId, removed.node, true) }, allowedNavigationIds)); setTreeDirty(true);
     setStatus("ページをひとつ外側へ移動しました");
   };
 
@@ -359,7 +322,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     setSaving(true); setStatus(`${changed.length}ページとツリーをGitHubへ保存しています…`);
     try {
       const response = await fetch("/api/github/save", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken ?? "" }, body: JSON.stringify({
-        baseCommitSha, navigation: stringifyYaml(navigation), description: "ページエディターからの一括更新です。",
+        baseCommitSha, navigation: stringifyYaml(safeNavigation), description: "ページエディターからの一括更新です。",
         pages: changed.map((page) => ({ id: page.id, originalSlug: page.isNew ? undefined : page.originalSlug, slug: page.slug, content: page.deleted ? undefined : serializeDocument(page), deleted: Boolean(page.deleted), assets: page.assets.map(({ name, contentBase64 }) => ({ name, contentBase64 })), title: page.data.title })),
       }) });
       const result = await response.json() as SaveResponse;
