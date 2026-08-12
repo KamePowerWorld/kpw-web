@@ -17,7 +17,6 @@ type DocSummary = {
     eyebrow: string;
     heroLead: string;
     heroImage?: string;
-    credits: string;
   };
 };
 
@@ -32,7 +31,13 @@ type Session = {
 
 type AssetDraft = { name: string; contentBase64: string; objectUrl: string };
 type ContentResponse = { content: string; baseCommitSha: string; error?: string };
-type SaveResponse = { mode?: "direct" | "pull-request"; redirectUrl?: string; actionUrl?: string; error?: string };
+type SaveResponse = {
+  mode?: "direct" | "pull-request";
+  redirectUrl?: string;
+  actionUrl?: string;
+  commitSha?: string;
+  error?: string;
+};
 
 const emptyData: DocSummary["data"] = {
   title: "",
@@ -41,7 +46,6 @@ const emptyData: DocSummary["data"] = {
   draft: false,
   eyebrow: "KAMEPOWER WORLD / GUIDE",
   heroLead: "",
-  credits: "かめっちイラスト：かふぇ",
 };
 
 function parseScalar(value: string) {
@@ -68,10 +72,9 @@ function parseDocument(source: string) {
 
 function serializeDocument(data: DocSummary["data"], body: string) {
   const fields: Array<[string, unknown]> = [
-    ["title", data.title], ["description", data.description], ["order", data.order], ["draft", data.draft],
+    ["title", data.title], ["description", data.heroLead], ["order", data.order], ["draft", data.draft],
     ["eyebrow", data.eyebrow], ["heroLead", data.heroLead],
     ...(data.heroImage ? [["heroImage", data.heroImage] as [string, unknown]] : []),
-    ["credits", data.credits],
   ];
   const yaml = fields.map(([key, value]) => `${key}: ${typeof value === "string" ? JSON.stringify(value) : value}`).join("\n");
   return `---\n${yaml}\n---\n\n${body.trim()}\n`;
@@ -116,8 +119,9 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
   const [assets, setAssets] = useState<AssetDraft[]>([]);
   const [session, setSession] = useState<Session>({ authenticated: false });
   const [baseCommitSha, setBaseCommitSha] = useState<string | undefined>();
-  const [status, setStatus] = useState("下書きはこのブラウザに自動保存されます");
+  const [status, setStatus] = useState("編集内容はこのブラウザに自動保存されます");
   const [saving, setSaving] = useState(false);
+  const [activePane, setActivePane] = useState<"edit" | "preview">("edit");
 
   const draftKey = `kpw-editor:${path || "new"}`;
   useEffect(() => {
@@ -127,7 +131,7 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
       try {
         const parsed = JSON.parse(draft);
         setData(parsed.data); setBody(parsed.body); setSlug(parsed.slug || slug);
-        setStatus("ブラウザに保存された下書きを復元しました");
+        setStatus("ブラウザに保存された編集内容を復元しました");
       } catch { localStorage.removeItem(draftKey); }
     }
   }, []);
@@ -167,6 +171,9 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
     return DOMPurify.sanitize(marked.parse(body, { gfm: true, renderer }) as string, { USE_PROFILES: { html: true } });
   }, [body, assets, slug, data.title]);
 
+  const pageSlug = path.split("/")[1] || slug || toSlug(data.title);
+  const pageUrl = pageSlug ? `/${pageSlug}/` : "";
+
   const updateData = <K extends keyof DocSummary["data"]>(key: K, value: DocSummary["data"][K]) => {
     setData((current) => ({ ...current, [key]: value }));
   };
@@ -195,8 +202,8 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
       return;
     }
     const finalSlug = slug || toSlug(data.title);
-    if (!finalSlug || !data.title || !data.description || !data.heroLead || !data.credits) {
-      setStatus("タイトル、slug、説明、リード文、クレジットを入力してください"); return;
+    if (!finalSlug || !data.title || !data.heroLead) {
+      setStatus("タイトル、slug、リード文を入力してください"); return;
     }
     setSaving(true); setStatus("GitHubへ保存しています…");
     try {
@@ -209,21 +216,31 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
           content: serializeDocument(data, body),
           baseCommitSha,
           title: data.title,
-          description: data.description,
+          description: data.description || data.heroLead,
           assets: assets.map(({ name, contentBase64 }) => ({ name, contentBase64 })),
         }),
       });
       const result = await response.json() as SaveResponse;
       if (!response.ok && result.actionUrl) {
-        setStatus(result.error || "GitHubで準備を続けます。下書きはブラウザに保存されています。");
+        setStatus(result.error || "GitHubで準備を続けます。編集内容はブラウザに保存されています。");
         window.setTimeout(() => { location.href = result.actionUrl!; }, 900);
         return;
       }
       if (!response.ok || !result.mode || !result.redirectUrl) throw new Error(result.error || "保存に失敗しました");
-      const redirectUrl = result.redirectUrl;
       localStorage.removeItem(draftKey);
-      setStatus(result.mode === "direct" ? "masterへ保存しました。公開ビルドが始まります。" : "GitHubのPull Request画面を開きます。");
-      window.setTimeout(() => { location.href = redirectUrl; }, 600);
+      if (result.mode === "direct") {
+        const finalPath = path || `pages/${finalSlug}/index.md`;
+        setPath(finalPath);
+        setSlug(finalSlug);
+        setBaseCommitSha(result.commitSha);
+        history.replaceState(null, "", `/editor?path=${encodeURIComponent(finalPath)}`);
+        setAssets([]);
+        setStatus("保存しました。公開には少し時間がかかります。準備できたら「ページを見る」で確認してください。");
+        setSaving(false);
+        return;
+      }
+      setStatus("GitHubのPull Request作成画面を開きます。");
+      window.setTimeout(() => { location.href = result.redirectUrl!; }, 600);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存に失敗しました");
       setSaving(false);
@@ -249,33 +266,38 @@ export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }
       <div className="editor-meta">
         <label>タイトル<input value={data.title} onChange={(event) => updateData("title", event.target.value)} /></label>
         <label>slug<input value={slug} disabled={Boolean(path)} placeholder="english-kebab-case" onChange={(event) => setSlug(toSlug(event.target.value))} /></label>
-        <label className="wide">説明<input value={data.description} onChange={(event) => updateData("description", event.target.value)} /></label>
         <label>表示順<input type="number" value={data.order} onChange={(event) => updateData("order", Number(event.target.value))} /></label>
         <label>見出しラベル<input value={data.eyebrow} onChange={(event) => updateData("eyebrow", event.target.value)} /></label>
         <label className="wide">リード文<input value={data.heroLead} onChange={(event) => updateData("heroLead", event.target.value)} /></label>
-        <label className="wide">クレジット<input value={data.credits} onChange={(event) => updateData("credits", event.target.value)} /></label>
-        <label className="checkbox"><input type="checkbox" checked={data.draft} onChange={(event) => updateData("draft", event.target.checked)} />下書き</label>
+        <label className="checkbox"><input type="checkbox" checked={data.draft} onChange={(event) => updateData("draft", event.target.checked)} />まだ非公開</label>
       </div>
 
       <div className="editor-actions">
-        <button onClick={() => setSourceMode((value) => !value)}>{sourceMode ? "WYSIWYGに戻る" : "Markdownソース"}</button>
+        <button onClick={() => { setSourceMode((value) => !value); setActivePane("edit"); }}>{sourceMode ? "通常編集に戻る" : "Markdownソース"}</button>
         <label className="asset-button">画像を追加<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => void addAssets(event.target.files)} /></label>
+        {pageUrl
+          ? <a className="view-page-button" href={pageUrl} target="_blank" rel="noreferrer">ページを見る ↗</a>
+          : <span className="view-page-hint">保存するとページを確認できます</span>}
         <span role="status">{status}</span>
       </div>
 
       <div className="editor-workspace">
-        <section className="editor-pane" aria-label="本文エディター">
+        <section className={`editor-pane ${activePane === "edit" ? "is-active" : ""}`} aria-label="本文エディター">
           {sourceMode
             ? <textarea className="source-editor" value={body} onChange={(event) => setBody(event.target.value)} />
             : <MilkdownSurface key={editorRevision} value={body} onChange={setBody} />}
         </section>
-        <section className="preview-pane" aria-label="サイトプレビュー">
+        <section className={`preview-pane ${activePane === "preview" ? "is-active" : ""}`} aria-label="サイトプレビュー">
           <div className="preview-hero">
             <p>{data.eyebrow}</p><h1>{data.title || "新しいガイド"}</h1><span>{data.heroLead}</span>
           </div>
           <article className="markdown-body notion-article" dangerouslySetInnerHTML={{ __html: previewHtml }} />
         </section>
       </div>
+      <nav className="mobile-pane-switcher" aria-label="編集表示の切り替え">
+        <button className={activePane === "edit" ? "active" : ""} onClick={() => setActivePane("edit")}>編集</button>
+        <button className={activePane === "preview" ? "active" : ""} onClick={() => setActivePane("preview")}>プレビュー</button>
+      </nav>
     </div>
   );
 }

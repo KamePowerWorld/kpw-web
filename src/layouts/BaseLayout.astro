@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import { logoDataUrl } from "../lib/brand-assets";
 
 interface Props {
   title: string;
@@ -17,7 +18,7 @@ const { title, description, bodyClass = "" } = Astro.props;
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
     <meta name="generator" content={Astro.generator} />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href={logoDataUrl} />
     <title>{title}</title>
   </head>
   <body class={bodyClass}>

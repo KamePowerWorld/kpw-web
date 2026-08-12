@@ -8,7 +8,6 @@ const frontmatterSchema = z.object({
   order: z.number().int().nonnegative(), draft: z.boolean(),
   eyebrow: z.string().min(1).max(100), heroLead: z.string().min(1).max(160),
   heroImage: z.string().regex(/^\.\/assets\/[A-Za-z0-9._-]+$/).optional(),
-  credits: z.string().min(1).max(200),
 }).strict();
 
 export function validateDocs(docsRoot) {

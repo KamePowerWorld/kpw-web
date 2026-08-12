@@ -11,7 +11,6 @@ export const frontmatterSchema = z.object({
   eyebrow: z.string().min(1).max(100),
   heroLead: z.string().min(1).max(160),
   heroImage: z.string().regex(/^\.\/assets\/[A-Za-z0-9._-]+$/).optional(),
-  credits: z.string().min(1).max(200),
 });
 
 export type Frontmatter = z.infer<typeof frontmatterSchema>;
@@ -63,7 +62,7 @@ export function renderMarkdown(source: string, slug: string) {
 
   renderer.image = ({ href, title, text }) => {
     const sourceUrl = href.startsWith("./assets/")
-      ? `/content/pages/${encodeURIComponent(slug)}/${href.slice(2)}`
+      ? `/content/${encodeURIComponent(slug)}/${href.slice(2)}`
       : href;
     const safeTitle = title ? ` title="${title.replaceAll('"', "&quot;")}"` : "";
     return `<img src="${sourceUrl}" alt="${text.replaceAll('"', "&quot;")}" loading="lazy"${safeTitle}>`;
@@ -108,7 +107,7 @@ export function loadPages(options: { includeDrafts?: boolean } = {}): DocPage[] 
         html,
         headings,
         heroImageUrl: data.heroImage
-          ? `/content/pages/${encodeURIComponent(slug)}/${data.heroImage.slice(2)}`
+          ? `/content/${encodeURIComponent(slug)}/${data.heroImage.slice(2)}`
           : undefined,
       } satisfies DocPage;
     })

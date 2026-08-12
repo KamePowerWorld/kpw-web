@@ -144,13 +144,18 @@ export const POST: APIRoute = async ({ request }) => {
         message,
         files,
       });
-      return jsonResponse({ mode: "direct", commitUrl: commit.html_url, redirectUrl: `/${input.path.split("/")[1]}/` });
+      return jsonResponse({
+        mode: "direct",
+        commitUrl: commit.html_url,
+        commitSha: commit.sha,
+        redirectUrl: `/${input.path.split("/")[1]}/`,
+      });
     }
 
     const fork = await prepareFork(session.accessToken, session.user.login, owner, repo, branch);
     if (!fork.ready) {
       const error = fork.reason === "fork"
-        ? "最初にGitHubでkpw-docsをforkしてください。下書きはブラウザに保存されています。"
+        ? "最初にGitHubでkpw-docsをforkしてください。編集内容はブラウザに保存されています。"
         : "forkへ書き込むため、GitHub Appを個人アカウントへインストールしてください。";
       return jsonResponse({ error, actionUrl: fork.actionUrl }, 409);
     }

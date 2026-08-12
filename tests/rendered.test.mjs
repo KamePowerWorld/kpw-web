@@ -7,7 +7,8 @@ test("guide and 2026 pages are prerendered", () => {
   const lifeServer = readFileSync("dist/client/2026-poikatsu/index.html", "utf8");
   assert.match(guide, /かめぱわぁ〜るど 遊びかたガイド/);
   assert.match(lifeServer, /2026 ポイ活生活鯖/);
-  assert.match(lifeServer, /\/content\/pages\/2026-poikatsu\/assets\/image-2\.png/);
+  assert.match(lifeServer, /\/content\/2026-poikatsu\/assets\/image-2\.png/);
+  assert.doesNotMatch(lifeServer, /クレジット|credits/);
   assert.doesNotMatch(lifeServer, /<article[^>]*>[\s\S]*?<script/i);
 });
 
