@@ -2,98 +2,160 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import {
+  DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter,
+  useSensor, useSensors, type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
+type NavigationNode = { id: string; children?: NavigationNode[] };
+type Navigation = { version: 1; tree: NavigationNode[] };
+type DocData = { id: string; title: string; draft: boolean; heroLead: string; heroImage?: string; aliases: string[] };
 type DocSummary = {
-  slug: string;
-  filePath: string;
-  body: string;
-  data: {
-    title: string;
-    description: string;
-    order: number;
-    draft: boolean;
-    eyebrow: string;
-    heroLead: string;
-    heroImage?: string;
-  };
+  id: string; slug: string; filePath: string; body: string; data: DocData;
+  canonicalPath: string; parentId?: string; childIds: string[]; depth: number;
 };
-
+type PageDraft = DocSummary & { originalSlug?: string; assets: AssetDraft[]; deleted?: boolean; isNew?: boolean };
+type AssetDraft = { name: string; contentBase64: string; mime: string };
 type Session = {
-  authenticated: boolean;
-  canPush?: boolean;
-  installationReady?: boolean;
-  installationUrl?: string;
-  csrfToken?: string;
+  authenticated: boolean; canPush?: boolean; installationReady?: boolean; installationUrl?: string; csrfToken?: string;
   user?: { login: string; name: string | null; avatarUrl: string };
 };
+type WorkspaceResponse = { pages: Array<{ slug: string; filePath: string; content: string }>; navigation: string; baseCommitSha: string; error?: string };
+type SaveResponse = { mode?: "direct" | "pull-request"; redirectUrl?: string; actionUrl?: string; commitSha?: string; error?: string };
+type PersistedWorkspace = { pages: PageDraft[]; navigation: Navigation; dirtyIds: string[]; treeDirty: boolean; baseCommitSha?: string; selectedId: string };
 
-type AssetDraft = { name: string; contentBase64: string; objectUrl: string };
-type ContentResponse = { content: string; baseCommitSha: string; error?: string };
-type SaveResponse = {
-  mode?: "direct" | "pull-request";
-  redirectUrl?: string;
-  actionUrl?: string;
-  commitSha?: string;
-  error?: string;
-};
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const workspaceStorageKey = "current";
 
-const emptyData: DocSummary["data"] = {
-  title: "",
-  description: "",
-  order: 100,
-  draft: false,
-  eyebrow: "KAMEPOWER WORLD / GUIDE",
-  heroLead: "",
-};
-
-function parseScalar(value: string) {
-  const trimmed = value.trim();
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
-  if (trimmed.startsWith('"')) {
-    try { return JSON.parse(trimmed); } catch { return trimmed.slice(1, -1); }
-  }
-  return trimmed;
+function parseDocument(source: string, slug: string): PageDraft {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) throw new Error(`${slug}: front matter is missing`);
+  const raw = parseYaml(match[1]) as Partial<DocData>;
+  if (!raw.id || !raw.title) throw new Error(`${slug}: id or title is missing`);
+  const data: DocData = {
+    id: raw.id, title: raw.title, draft: Boolean(raw.draft), heroLead: raw.heroLead ?? "",
+    heroImage: raw.heroImage, aliases: Array.isArray(raw.aliases) ? raw.aliases : [],
+  };
+  return {
+    id: data.id, slug, originalSlug: slug, filePath: `pages/${slug}/index.md`, data, body: match[2], assets: [],
+    canonicalPath: slug === "index" ? "/" : `/${slug}`, childIds: [], depth: 0,
+  };
 }
 
-function parseDocument(source: string) {
-  const match = source.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!match) return { data: { ...emptyData }, body: source };
-  const values: Record<string, unknown> = {};
-  for (const line of match[1].split("\n")) {
-    const separator = line.indexOf(":");
-    if (separator > 0) values[line.slice(0, separator).trim()] = parseScalar(line.slice(separator + 1));
-  }
-  return { data: { ...emptyData, ...values } as DocSummary["data"], body: match[2] };
-}
-
-function serializeDocument(data: DocSummary["data"], body: string) {
-  const fields: Array<[string, unknown]> = [
-    ["title", data.title], ["description", data.heroLead], ["order", data.order], ["draft", data.draft],
-    ["eyebrow", data.eyebrow], ["heroLead", data.heroLead],
-    ...(data.heroImage ? [["heroImage", data.heroImage] as [string, unknown]] : []),
-  ];
-  const yaml = fields.map(([key, value]) => `${key}: ${typeof value === "string" ? JSON.stringify(value) : value}`).join("\n");
-  return `---\n${yaml}\n---\n\n${body.trim()}\n`;
+function serializeDocument(page: PageDraft) {
+  const data: Record<string, unknown> = {
+    id: page.id, title: page.data.title, draft: page.data.draft, heroLead: page.data.heroLead,
+  };
+  if (page.data.heroImage) data.heroImage = page.data.heroImage;
+  if (page.data.aliases.length) data.aliases = page.data.aliases;
+  return `---\n${stringifyYaml(data).trim()}\n---\n\n${page.body.trim()}\n`;
 }
 
 function toSlug(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
 }
 
+function decoratePages(pages: PageDraft[], navigation: Navigation) {
+  const copies = pages.map((page) => ({ ...page, data: { ...page.data }, childIds: [] as string[], depth: 0 }));
+  const byId = new Map(copies.map((page) => [page.id, page]));
+  const index = copies.find((page) => page.slug === "index");
+  if (index) { index.canonicalPath = "/"; index.childIds = navigation.tree.map((node) => node.id); }
+  const visit = (nodes: NavigationNode[], parent: PageDraft | undefined, segments: string[]) => {
+    for (const node of nodes) {
+      const page = byId.get(node.id); if (!page) continue;
+      page.parentId = parent?.id; page.depth = segments.length;
+      page.canonicalPath = `/${[...segments, page.slug].join("/")}`;
+      page.childIds = (node.children ?? []).map((child) => child.id);
+      visit(node.children ?? [], page, [...segments, page.slug]);
+    }
+  };
+  visit(navigation.tree, undefined, []);
+  return copies;
+}
+
+function flattenTree(nodes: NavigationNode[], depth = 0, parentId?: string): Array<{ id: string; depth: number; parentId?: string }> {
+  return nodes.flatMap((node) => [{ id: node.id, depth, parentId }, ...flattenTree(node.children ?? [], depth + 1, node.id)]);
+}
+
+function containsNode(node: NavigationNode, id: string): boolean {
+  return node.id === id || (node.children ?? []).some((child) => containsNode(child, id));
+}
+
+function findNode(nodes: NavigationNode[], id: string): NavigationNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const nested = findNode(node.children ?? [], id);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+function removeNode(nodes: NavigationNode[], id: string): { tree: NavigationNode[]; node?: NavigationNode } {
+  let found: NavigationNode | undefined;
+  const tree: NavigationNode[] = [];
+  for (const item of nodes) {
+    if (item.id === id) { found = item; continue; }
+    const nested = removeNode(item.children ?? [], id);
+    if (nested.node) found = nested.node;
+    tree.push({ ...item, ...(nested.tree.length ? { children: nested.tree } : {}) });
+  }
+  return { tree, node: found };
+}
+
+function insertRelative(nodes: NavigationNode[], targetId: string, node: NavigationNode, after: boolean): NavigationNode[] {
+  const result: NavigationNode[] = [];
+  for (const item of nodes) {
+    if (item.id === targetId && !after) result.push(node);
+    result.push({ ...item, ...(item.children?.length ? { children: insertRelative(item.children, targetId, node, after) } : {}) });
+    if (item.id === targetId && after) result.push(node);
+  }
+  return result;
+}
+
+function appendChild(nodes: NavigationNode[], parentId: string, node: NavigationNode): NavigationNode[] {
+  return nodes.map((item) => item.id === parentId
+    ? { ...item, children: [...(item.children ?? []), node] }
+    : { ...item, ...(item.children?.length ? { children: appendChild(item.children, parentId, node) } : {}) });
+}
+
+function openWorkspaceDb() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("kpw-editor", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("workspace");
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPersistedWorkspace(): Promise<PersistedWorkspace | undefined> {
+  const db = await openWorkspaceDb();
+  return await new Promise((resolve, reject) => {
+    const request = db.transaction("workspace").objectStore("workspace").get(workspaceStorageKey);
+    request.onsuccess = () => resolve(request.result as PersistedWorkspace | undefined); request.onerror = () => reject(request.error);
+  });
+}
+
+async function writePersistedWorkspace(value?: PersistedWorkspace) {
+  const db = await openWorkspaceDb();
+  await new Promise<void>((resolve, reject) => {
+    const store = db.transaction("workspace", "readwrite").objectStore("workspace");
+    const request = value ? store.put(value, workspaceStorageKey) : store.delete(workspaceStorageKey);
+    request.onsuccess = () => resolve(); request.onerror = () => reject(request.error);
+  });
+}
+
 function MilkdownSurface({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!root.current) return;
-    const crepe = new Crepe({
-      root: root.current,
-      defaultValue: value,
-      features: { [CrepeFeature.AI]: false, [CrepeFeature.Latex]: false, [CrepeFeature.CodeMirror]: false },
-    });
-    crepe.on((listener) => listener.markdownUpdated((_ctx, markdown) => onChange(markdown)));
+    const crepe = new Crepe({ root: root.current, defaultValue: value, features: {
+      [CrepeFeature.AI]: false, [CrepeFeature.Latex]: false, [CrepeFeature.CodeMirror]: false,
+    } });
+    crepe.on((listener) => listener.markdownUpdated((_ctx, markdown) => { if (markdown !== value) onChange(markdown); }));
     void crepe.create();
     return () => { void crepe.destroy(); };
   }, []);
@@ -101,203 +163,243 @@ function MilkdownSurface({ value, onChange }: { value: string; onChange: (value:
 }
 
 async function fileToDraft(file: File): Promise<AssetDraft> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
+  const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return { name: file.name.replace(/[^A-Za-z0-9._-]/g, "-"), contentBase64: btoa(binary), objectUrl: URL.createObjectURL(file) };
+  return { name: file.name.replace(/[^A-Za-z0-9._-]/g, "-"), contentBase64: btoa(binary), mime: file.type };
 }
 
-export default function EditorApp({ initialDocs }: { initialDocs: DocSummary[] }) {
-  const requestedPath = new URLSearchParams(location.search).get("path");
-  const initial = initialDocs.find((doc) => doc.filePath === requestedPath) ?? null;
-  const [path, setPath] = useState(initial?.filePath ?? "");
-  const [slug, setSlug] = useState(initial?.slug ?? "");
-  const [data, setData] = useState<DocSummary["data"]>(initial?.data ?? { ...emptyData });
-  const [body, setBody] = useState(initial?.body ?? "# 新しいガイド\n\nここから書き始めよう。\n");
+function SortablePage({ page, selected, dirty, onSelect, onAdd, onRename, onDelete }: {
+  page: PageDraft; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void;
+}) {
+  const sortable = useSortable({ id: page.id });
+  return <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth } as React.CSSProperties}
+    className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""}`}>
+    <button className="drag-handle" {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}>⠿</button>
+    <button className="page-name" onClick={onSelect}>{dirty && <span className="dirty-dot" aria-label="変更済み">●</span>}{page.data.draft && <span aria-label="まだ非公開">◇</span>}{page.data.title}</button>
+    <div className="row-actions"><button onClick={onAdd} title="子ページを追加">＋</button><button onClick={onRename} title="slugを変更">⋯</button><button onClick={onDelete} title="削除">×</button></div>
+  </div>;
+}
+
+export default function EditorApp({ initialDocs, initialNavigation }: { initialDocs: DocSummary[]; initialNavigation: Navigation }) {
+  const initialPages = initialDocs.map((doc) => ({ ...doc, originalSlug: doc.slug, assets: [], data: { ...doc.data, aliases: doc.data.aliases ?? [] } }));
+  const searchParams = new URLSearchParams(location.search);
+  const requestedId = searchParams.get("page") ?? initialPages.find((page) => page.filePath === searchParams.get("path"))?.id;
+  const [pages, setPages] = useState<PageDraft[]>(initialPages);
+  const [navigation, setNavigation] = useState<Navigation>(initialNavigation);
+  const [selectedId, setSelectedId] = useState(requestedId ?? initialPages.find((page) => page.slug === "index")?.id ?? initialPages[0]?.id ?? "");
+  const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
+  const [treeDirty, setTreeDirty] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [session, setSession] = useState<Session>({ authenticated: false });
+  const [baseCommitSha, setBaseCommitSha] = useState<string>();
+  const [status, setStatus] = useState("変更内容はこのブラウザに保存されます");
+  const [saving, setSaving] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [editorRevision, setEditorRevision] = useState(0);
-  const [assets, setAssets] = useState<AssetDraft[]>([]);
-  const [session, setSession] = useState<Session>({ authenticated: false });
-  const [baseCommitSha, setBaseCommitSha] = useState<string | undefined>();
-  const [status, setStatus] = useState("編集内容はこのブラウザに自動保存されます");
-  const [saving, setSaving] = useState(false);
   const [activePane, setActivePane] = useState<"edit" | "preview">("edit");
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
-  const draftKey = `kpw-editor:${path || "new"}`;
+  const decorated = useMemo(() => decoratePages(pages, navigation), [pages, navigation]);
+  const current = decorated.find((page) => page.id === selectedId && !page.deleted) ?? decorated.find((page) => page.slug === "index" && !page.deleted) ?? decorated.find((page) => !page.deleted);
+  const flatTree = useMemo(() => flattenTree(navigation.tree), [navigation]);
+  const treePages = flatTree.map((entry) => decorated.find((page) => page.id === entry.id)).filter((page): page is PageDraft => Boolean(page && !page.deleted));
+  const deletedPages = pages.filter((page) => page.deleted);
+
   useEffect(() => {
-    void fetch("/api/github/session").then((response) => response.json() as Promise<Session>).then(setSession).catch(() => undefined);
-    const draft = localStorage.getItem(draftKey);
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft);
-        setData(parsed.data); setBody(parsed.body); setSlug(parsed.slug || slug);
-        setStatus("ブラウザに保存された編集内容を復元しました");
-      } catch { localStorage.removeItem(draftKey); }
-    }
+    void Promise.all([fetch("/api/github/session").then((response) => response.json() as Promise<Session>), readPersistedWorkspace().catch(() => undefined)])
+      .then(([nextSession, stored]) => {
+        setSession(nextSession);
+        if (stored) {
+          setPages(stored.pages); setNavigation(stored.navigation); setDirtyIds(new Set(stored.dirtyIds)); setTreeDirty(stored.treeDirty);
+          setBaseCommitSha(stored.baseCommitSha); setSelectedId(stored.selectedId); setStatus("ブラウザに保存された変更内容を復元しました");
+        }
+        setHydrated(true);
+      });
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => localStorage.setItem(draftKey, JSON.stringify({ data, body, slug })), 250);
-    return () => window.clearTimeout(timer);
-  }, [data, body, slug, draftKey]);
+    if (!hydrated || !session.authenticated) return;
+    void fetch("/api/github/workspace").then(async (response) => {
+      const result = await response.json() as WorkspaceResponse; if (!response.ok) throw new Error(result.error); return result;
+    }).then((result) => {
+      if (dirtyIds.size || treeDirty) {
+        if (!baseCommitSha) setBaseCommitSha(result.baseCommitSha);
+        setStatus("保存済みの編集内容を表示中です。GitHubの最新版は一括保存時に競合確認されます。"); return;
+      }
+      const remotePages = result.pages.map((item) => parseDocument(item.content, item.slug));
+      const remoteNavigation = parseYaml(result.navigation) as Navigation;
+      setPages(remotePages); setNavigation(remoteNavigation); setBaseCommitSha(result.baseCommitSha); setStatus("GitHub上の最新版を読み込みました");
+    }).catch((error) => setStatus(`ローカル内容を表示中：${error instanceof Error ? error.message : "取得に失敗しました"}`));
+  }, [hydrated, session.authenticated]);
 
   useEffect(() => {
-    if (!session.authenticated || !path) return;
-    void fetch(`/api/github/content?path=${encodeURIComponent(path)}`)
-      .then(async (response) => {
-        const result = await response.json() as ContentResponse;
-        if (!response.ok) throw new Error(result.error);
-        return result;
-      })
-      .then((result) => {
-        const parsed = parseDocument(result.content);
-        setData(parsed.data); setBody(parsed.body); setBaseCommitSha(result.baseCommitSha); setEditorRevision((value) => value + 1);
-        setStatus("GitHub上の最新版を読み込みました");
-      })
-      .catch((error) => setStatus(`ローカル内容を表示中：${error.message}`));
-  }, [session.authenticated, path]);
+    if (!hydrated) return;
+    const timer = window.setTimeout(() => {
+      const hasChanges = dirtyIds.size > 0 || treeDirty;
+      void writePersistedWorkspace(hasChanges ? { pages, navigation, dirtyIds: [...dirtyIds], treeDirty, baseCommitSha, selectedId } : undefined);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [pages, navigation, dirtyIds, treeDirty, baseCommitSha, selectedId, hydrated]);
 
-  const previewHtml = useMemo(() => {
-    const pageSlug = slug || toSlug(data.title) || "new-page";
-    const objectUrls = new Map(assets.map((asset) => [asset.name, asset.objectUrl]));
-    const renderer = new marked.Renderer();
-    renderer.image = ({ href, text, title }) => {
-      const name = href.startsWith("./assets/") ? href.slice("./assets/".length) : "";
-      const src = objectUrls.get(name) ?? (href.startsWith("./assets/")
-        ? `https://raw.githubusercontent.com/KamePowerWorld/kpw-docs/master/pages/${pageSlug}/assets/${encodeURIComponent(name)}`
-        : href);
-      return `<img src="${src}" alt="${text.replaceAll('"', "&quot;")}"${title ? ` title="${title}"` : ""}>`;
-    };
-    return DOMPurify.sanitize(marked.parse(body, { gfm: true, renderer }) as string, { USE_PROFILES: { html: true } });
-  }, [body, assets, slug, data.title]);
-
-  const pageSlug = path.split("/")[1] || slug || toSlug(data.title);
-  const pageUrl = pageSlug ? `/${pageSlug}/` : "";
-
-  const updateData = <K extends keyof DocSummary["data"]>(key: K, value: DocSummary["data"][K]) => {
-    setData((current) => ({ ...current, [key]: value }));
+  const markDirty = (id: string) => setDirtyIds((currentIds) => new Set(currentIds).add(id));
+  const updatePage = (id: string, updater: (page: PageDraft) => PageDraft) => {
+    setPages((currentPages) => currentPages.map((page) => page.id === id ? updater(page) : page)); markDirty(id);
+  };
+  const selectPage = (id: string) => {
+    setSelectedId(id); setEditorRevision((value) => value + 1); setExplorerOpen(false);
+    history.replaceState(null, "", `/editor?page=${encodeURIComponent(id)}`);
   };
 
-  const choosePage = (filePath: string) => {
-    const page = initialDocs.find((doc) => doc.filePath === filePath);
-    if (!page) return;
-    setPath(page.filePath); setSlug(page.slug); setData(page.data); setBody(page.body); setAssets([]);
-    history.replaceState(null, "", `/editor?path=${encodeURIComponent(page.filePath)}`);
-    setEditorRevision((value) => value + 1);
+  const releaseAlias = (slug: string, exceptId: string) => {
+    const affected: string[] = [];
+    setPages((currentPages) => currentPages.map((page) => {
+      if (page.id === exceptId || !page.data.aliases.includes(slug)) return page;
+      affected.push(page.id); return { ...page, data: { ...page.data, aliases: page.data.aliases.filter((alias) => alias !== slug) } };
+    }));
+    if (affected.length) setDirtyIds((ids) => new Set([...ids, ...affected]));
+  };
+
+  const createPage = (parentId?: string) => {
+    const title = window.prompt("新しいページのタイトル"); if (!title?.trim()) return;
+    const proposed = window.prompt("slug（英小文字・数字・ハイフン）", toSlug(title)); if (!proposed) return;
+    const slug = toSlug(proposed);
+    if (!slugPattern.test(slug) || slug === "index") { setStatus("使用できないslugです"); return; }
+    if (pages.some((page) => !page.deleted && page.slug === slug)) { setStatus(`slug「${slug}」はすでに使われています`); return; }
+    const id = crypto.randomUUID(); releaseAlias(slug, id);
+    const page: PageDraft = {
+      id, slug, filePath: `pages/${slug}/index.md`, data: { id, title: title.trim(), draft: true, heroLead: "ここにページの説明を書きます。", aliases: [] },
+      body: `# ${title.trim()}\n\nここから書き始めよう。\n`, assets: [], canonicalPath: `/${slug}`, childIds: [], depth: 0, isNew: true,
+    };
+    setPages((value) => [...value, page]);
+    setNavigation((value) => ({ ...value, tree: parentId ? appendChild(value.tree, parentId, { id }) : [...value.tree, { id }] }));
+    setDirtyIds((ids) => new Set(ids).add(id)); setTreeDirty(true); selectPage(id); setStatus("新しいページを追加しました。まだGitHubには保存されていません。");
+  };
+
+  const renameSlug = (page: PageDraft) => {
+    if (page.slug === "index") return;
+    const input = window.prompt("新しいslug", page.slug); if (!input) return;
+    const slug = toSlug(input); if (!slugPattern.test(slug) || slug === "index") { setStatus("使用できないslugです"); return; }
+    if (pages.some((item) => item.id !== page.id && !item.deleted && item.slug === slug)) { setStatus(`slug「${slug}」はすでに使われています`); return; }
+    releaseAlias(slug, page.id);
+    updatePage(page.id, (item) => ({ ...item, slug, filePath: `pages/${slug}/index.md`, data: { ...item.data, aliases: [...new Set([...item.data.aliases.filter((alias) => alias !== slug), item.slug])] } }));
+    setTreeDirty(true); setStatus(`slugを「${slug}」へ変更しました。一括保存時に画像も移動します。`);
+  };
+
+  const deletePage = (page: PageDraft) => {
+    if (page.slug === "index") { setStatus("トップページは削除できません"); return; }
+    if (page.childIds.length) { setStatus("子ページがあるため削除できません。先に子ページを移動してください。"); return; }
+    if (!window.confirm(`「${page.data.title}」を削除予定にしますか？\n一括保存前なら取り消せます。`)) return;
+    setPages((value) => value.map((item) => item.id === page.id ? { ...item, deleted: true } : item));
+    setNavigation((value) => ({ ...value, tree: removeNode(value.tree, page.id).tree }));
+    setDirtyIds((ids) => new Set(ids).add(page.id)); setTreeDirty(true);
+    const index = pages.find((item) => item.slug === "index"); if (index) selectPage(index.id);
+  };
+
+  const undoDelete = (page: PageDraft) => {
+    setPages((value) => value.map((item) => item.id === page.id ? { ...item, deleted: false } : item));
+    setNavigation((value) => ({ ...value, tree: [...value.tree, { id: page.id }] })); setTreeDirty(true); markDirty(page.id);
+  };
+
+  const handleDragEnd = ({ active, over, delta }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const activeNode = findNode(navigation.tree, String(active.id));
+    if (activeNode && containsNode(activeNode, String(over.id))) { setStatus("子孫ページの中へは移動できません"); return; }
+    const removed = removeNode(navigation.tree, String(active.id)); if (!removed.node) return;
+    let tree = removed.tree;
+    if (delta.x > 34) tree = appendChild(tree, String(over.id), removed.node);
+    else tree = insertRelative(tree, String(over.id), removed.node, delta.y > 0);
+    setNavigation({ ...navigation, tree }); setTreeDirty(true); setStatus("ページツリーを変更しました。まとめて保存できます。");
   };
 
   const addAssets = async (files: FileList | null) => {
-    if (!files) return;
-    const additions = await Promise.all([...files].map(fileToDraft));
-    setAssets((current) => [...current, ...additions]);
-    const markdown = additions.map((asset) => `![${asset.name}](./assets/${asset.name})`).join("\n\n");
-    setBody((current) => `${current.trim()}\n\n${markdown}\n`);
+    if (!files || !current) return; const additions = await Promise.all([...files].map(fileToDraft));
+    updatePage(current.id, (page) => ({ ...page, assets: [...page.assets, ...additions], body: `${page.body.trim()}\n\n${additions.map((asset) => `![${asset.name}](./assets/${asset.name})`).join("\n\n")}\n` }));
     setEditorRevision((value) => value + 1);
   };
 
-  const save = async () => {
+  const previewHtml = useMemo(() => {
+    if (!current) return "";
+    const assets = new Map(current.assets.map((asset) => [asset.name, `data:${asset.mime};base64,${asset.contentBase64}`]));
+    const renderer = new marked.Renderer();
+    renderer.image = ({ href, text, title }) => {
+      const name = href.startsWith("./assets/") ? href.slice(9) : "";
+      const src = assets.get(name) ?? (href.startsWith("./assets/") ? `https://raw.githubusercontent.com/KamePowerWorld/kpw-docs/master/pages/${current.slug}/assets/${encodeURIComponent(name)}` : href);
+      return `<img src="${src}" alt="${text.replaceAll('"', "&quot;")}"${title ? ` title="${title}"` : ""}>`;
+    };
+    return DOMPurify.sanitize(marked.parse(current.body, { gfm: true, renderer }) as string, { USE_PROFILES: { html: true } });
+  }, [current?.body, current?.assets, current?.slug]);
+
+  const saveAll = async () => {
     if (!session.authenticated) { location.href = "/api/auth/login"; return; }
-    if (session.installationReady === false && session.installationUrl) {
-      location.href = session.installationUrl;
-      return;
-    }
-    const finalSlug = slug || toSlug(data.title);
-    if (!finalSlug || !data.title || !data.heroLead) {
-      setStatus("タイトル、slug、リード文を入力してください"); return;
-    }
-    setSaving(true); setStatus("GitHubへ保存しています…");
+    if (session.installationReady === false && session.installationUrl) { location.href = session.installationUrl; return; }
+    if (!baseCommitSha) { setStatus("GitHubの最新版を読み込んでから保存してください"); return; }
+    if (!dirtyIds.size && !treeDirty) { setStatus("保存する変更はありません"); return; }
+    const changed = pages.filter((page) => dirtyIds.has(page.id));
+    if (changed.some((page) => !page.deleted && (!page.data.title.trim() || !page.data.heroLead.trim()))) { setStatus("変更ページのタイトルとリード文を入力してください"); return; }
+    setSaving(true); setStatus(`${changed.length}ページとツリーをGitHubへ保存しています…`);
     try {
-      const finalPath = path || `pages/${finalSlug}/index.md`;
-      const response = await fetch("/api/github/save", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken ?? "" },
-        body: JSON.stringify({
-          path: finalPath,
-          content: serializeDocument(data, body),
-          baseCommitSha,
-          title: data.title,
-          description: data.description || data.heroLead,
-          assets: assets.map(({ name, contentBase64 }) => ({ name, contentBase64 })),
-        }),
-      });
+      const response = await fetch("/api/github/save", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken ?? "" }, body: JSON.stringify({
+        baseCommitSha, navigation: stringifyYaml(navigation), description: "ページエディターからの一括更新です。",
+        pages: changed.map((page) => ({ id: page.id, originalSlug: page.isNew ? undefined : page.originalSlug, slug: page.slug, content: page.deleted ? undefined : serializeDocument(page), deleted: Boolean(page.deleted), assets: page.assets.map(({ name, contentBase64 }) => ({ name, contentBase64 })), title: page.data.title })),
+      }) });
       const result = await response.json() as SaveResponse;
-      if (!response.ok && result.actionUrl) {
-        setStatus(result.error || "GitHubで準備を続けます。編集内容はブラウザに保存されています。");
-        window.setTimeout(() => { location.href = result.actionUrl!; }, 900);
-        return;
-      }
-      if (!response.ok || !result.mode || !result.redirectUrl) throw new Error(result.error || "保存に失敗しました");
-      localStorage.removeItem(draftKey);
-      if (result.mode === "direct") {
-        const finalPath = path || `pages/${finalSlug}/index.md`;
-        setPath(finalPath);
-        setSlug(finalSlug);
-        setBaseCommitSha(result.commitSha);
-        history.replaceState(null, "", `/editor?path=${encodeURIComponent(finalPath)}`);
-        setAssets([]);
-        setStatus("保存しました。公開には少し時間がかかります。準備できたら「ページを見る」で確認してください。");
-        setSaving(false);
-        return;
-      }
-      setStatus("GitHubのPull Request作成画面を開きます。");
-      window.setTimeout(() => { location.href = result.redirectUrl!; }, 600);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "保存に失敗しました");
-      setSaving(false);
-    }
+      if (!response.ok && result.actionUrl) { setStatus(result.error ?? "GitHubで準備を続けてください"); window.setTimeout(() => { location.href = result.actionUrl!; }, 900); return; }
+      if (!response.ok || !result.mode) throw new Error(result.error ?? "保存に失敗しました");
+      if (result.mode === "pull-request") { setStatus("GitHubのPull Request作成画面を開きます"); window.setTimeout(() => { location.href = result.redirectUrl!; }, 600); return; }
+      const savedPages = pages.filter((page) => !page.deleted).map((page) => ({ ...page, originalSlug: page.slug, isNew: false, assets: [] }));
+      setPages(savedPages); setDirtyIds(new Set()); setTreeDirty(false); setBaseCommitSha(result.commitSha); await writePersistedWorkspace();
+      setStatus("まとめて保存しました。公開後に「ページを見る」から確認できます。"); setSaving(false);
+    } catch (error) { setStatus(error instanceof Error ? error.message : "保存に失敗しました"); setSaving(false); }
   };
 
-  return (
-    <div className="editor-app">
-      <header className="editor-topbar">
-        <a href="/" className="editor-brand">← ガイドへ戻る</a>
-        <select aria-label="編集するページ" value={path} onChange={(event) => choosePage(event.target.value)}>
-          <option value="">新しいページ</option>
-          {initialDocs.map((doc) => <option key={doc.filePath} value={doc.filePath}>{doc.data.title}</option>)}
-        </select>
-        <div className="editor-session">
-          {session.authenticated ? <><img src={session.user?.avatarUrl} alt="" /><span>{session.user?.login}</span></> : <a href="/api/auth/login">GitHubでログイン</a>}
-        </div>
-        <button className="publish-button" disabled={saving} onClick={save}>
-          {saving ? "保存中…" : session.installationReady === false ? "GitHub Appを設定" : session.canPush ? "masterへ反映" : "GitHubで提案"}
+  if (!current) return <p>編集できるページがありません。</p>;
+  return <div className="editor-app">
+    <header className="editor-topbar">
+      <a href="/" className="editor-brand">← ガイドへ戻る</a>
+      <button className="explorer-toggle" onClick={() => setExplorerOpen((value) => !value)}>☰ ページ</button>
+      <div className="editor-session">{session.authenticated ? <><img src={session.user?.avatarUrl} alt="" /><span>{session.user?.login}</span></> : <a href="/api/auth/login">GitHubでログイン</a>}</div>
+      <button className="publish-button" disabled={saving} onClick={saveAll}>{saving ? "保存中…" : session.installationReady === false ? "GitHub Appを設定" : `変更をまとめて保存${dirtyIds.size || treeDirty ? ` (${dirtyIds.size + (treeDirty ? 1 : 0)})` : ""}`}</button>
+    </header>
+    <div className="editor-layout">
+      <aside className={`page-explorer ${explorerOpen ? "open" : ""}`}>
+        <div className="explorer-heading"><strong>ページ</strong><button onClick={() => createPage()}>＋ ルートに追加</button></div>
+        <button className={`index-page ${current.slug === "index" ? "selected" : ""}`} onClick={() => selectPage(pages.find((page) => page.slug === "index")!.id)}>
+          {dirtyIds.has(pages.find((page) => page.slug === "index")!.id) && <span className="dirty-dot">●</span>}⌂ トップページ
         </button>
-      </header>
-
-      <div className="editor-meta">
-        <label>タイトル<input value={data.title} onChange={(event) => updateData("title", event.target.value)} /></label>
-        <label>slug<input value={slug} disabled={Boolean(path)} placeholder="english-kebab-case" onChange={(event) => setSlug(toSlug(event.target.value))} /></label>
-        <label>表示順<input type="number" value={data.order} onChange={(event) => updateData("order", Number(event.target.value))} /></label>
-        <label>見出しラベル<input value={data.eyebrow} onChange={(event) => updateData("eyebrow", event.target.value)} /></label>
-        <label className="wide">リード文<input value={data.heroLead} onChange={(event) => updateData("heroLead", event.target.value)} /></label>
-        <label className="checkbox"><input type="checkbox" checked={data.draft} onChange={(event) => updateData("draft", event.target.checked)} />まだ非公開</label>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={treePages.map((page) => page.id)} strategy={verticalListSortingStrategy}>
+            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => deletePage(page)} />)}</div>
+          </SortableContext>
+        </DndContext>
+        {deletedPages.length > 0 && <div className="deleted-pages"><strong>削除予定</strong>{deletedPages.map((page) => <button key={page.id} onClick={() => undoDelete(page)}><s>{page.data.title}</s><span>取り消す</span></button>)}</div>}
+        <p className="explorer-help">左右へドラッグすると親を変更できます。● は未保存の変更です。</p>
+      </aside>
+      {explorerOpen && <button className="explorer-backdrop" aria-label="ページ一覧を閉じる" onClick={() => setExplorerOpen(false)} />}
+      <div className="editor-content">
+        <div className="editor-meta">
+          <label>タイトル<input value={current.data.title} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, title: event.target.value } }))} /></label>
+          <label className="wide">リード文<input value={current.data.heroLead} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, heroLead: event.target.value } }))} /></label>
+          <label className="checkbox"><input type="checkbox" checked={current.data.draft} disabled={current.slug === "index"} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, draft: event.target.checked } }))} />まだ非公開</label>
+        </div>
+        <div className="editor-actions">
+          <button onClick={() => { setSourceMode((value) => !value); setActivePane("edit"); }}>{sourceMode ? "通常編集に戻る" : "Markdownソース"}</button>
+          <label className="asset-button">画像を追加<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => void addAssets(event.target.files)} /></label>
+          <a className="view-page-button" href={current.canonicalPath} target="_blank" rel="noreferrer">ページを見る ↗</a>
+          <span role="status">{status}</span>
+        </div>
+        <div className="editor-workspace">
+          <section className={`editor-pane ${activePane === "edit" ? "is-active" : ""}`} aria-label="本文エディター">
+            {sourceMode ? <textarea className="source-editor" value={current.body} onChange={(event) => updatePage(current.id, (page) => ({ ...page, body: event.target.value }))} />
+              : <MilkdownSurface key={`${current.id}-${editorRevision}`} value={current.body} onChange={(body) => updatePage(current.id, (page) => ({ ...page, body }))} />}
+          </section>
+          <section className={`preview-pane ${activePane === "preview" ? "is-active" : ""}`} aria-label="サイトプレビュー">
+            <div className="preview-hero"><h1>{current.data.title || "新しいガイド"}</h1><span>{current.data.heroLead}</span></div>
+            <article className="markdown-body notion-article" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+          </section>
+        </div>
       </div>
-
-      <div className="editor-actions">
-        <button onClick={() => { setSourceMode((value) => !value); setActivePane("edit"); }}>{sourceMode ? "通常編集に戻る" : "Markdownソース"}</button>
-        <label className="asset-button">画像を追加<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(event) => void addAssets(event.target.files)} /></label>
-        {pageUrl
-          ? <a className="view-page-button" href={pageUrl} target="_blank" rel="noreferrer">ページを見る ↗</a>
-          : <span className="view-page-hint">保存するとページを確認できます</span>}
-        <span role="status">{status}</span>
-      </div>
-
-      <div className="editor-workspace">
-        <section className={`editor-pane ${activePane === "edit" ? "is-active" : ""}`} aria-label="本文エディター">
-          {sourceMode
-            ? <textarea className="source-editor" value={body} onChange={(event) => setBody(event.target.value)} />
-            : <MilkdownSurface key={editorRevision} value={body} onChange={setBody} />}
-        </section>
-        <section className={`preview-pane ${activePane === "preview" ? "is-active" : ""}`} aria-label="サイトプレビュー">
-          <div className="preview-hero">
-            <p>{data.eyebrow}</p><h1>{data.title || "新しいガイド"}</h1><span>{data.heroLead}</span>
-          </div>
-          <article className="markdown-body notion-article" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-        </section>
-      </div>
-      <nav className="mobile-pane-switcher" aria-label="編集表示の切り替え">
-        <button className={activePane === "edit" ? "active" : ""} onClick={() => setActivePane("edit")}>編集</button>
-        <button className={activePane === "preview" ? "active" : ""} onClick={() => setActivePane("preview")}>プレビュー</button>
-      </nav>
     </div>
-  );
+    <nav className="mobile-pane-switcher" aria-label="編集表示の切り替え"><button className={activePane === "edit" ? "active" : ""} onClick={() => setActivePane("edit")}>編集</button><button className={activePane === "preview" ? "active" : ""} onClick={() => setActivePane("preview")}>プレビュー</button></nav>
+  </div>;
 }

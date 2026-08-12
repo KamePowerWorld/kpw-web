@@ -15,6 +15,14 @@ npm run dev
 
 別の場所に原稿がある場合は`KPW_DOCS_DIR=/path/to/kpw-docs npm run dev`を使用します。
 
+## ページツリー
+
+- トップページは`kpw-docs/pages/index/index.md`で、URLは`/`に固定されます。
+- 通常ページはGitHub上では`pages/<slug>/`へフラットに置き、`navigation.yml`のツリーから公開URLを組み立てます。
+- URLは末尾スラッシュなしです。古い階層や過去slugは現在の正規URLへリダイレクトされます。
+- エディターでは複数ページとツリー変更をブラウザに保持し、1つのGit commitまたはPull Requestへまとめて保存します。
+- 子を持つページは削除できません。先にページエクスプローラーで子を移動します。
+
 ## GitHub App
 
 GitHub Appを作成し、次を設定します。

@@ -1,0 +1,21 @@
+---
+export const prerender = false;
+
+import GuidePage from "../components/GuidePage.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { loadPages, resolvePagePath } from "../lib/content";
+
+const requestedPath = `/${Astro.params.path ?? ""}`.replace(/\/+$/, "") || "/";
+const page = resolvePagePath(requestedPath);
+if (!page) return new Response("Not found", { status: 404 });
+if (requestedPath !== page.canonicalPath) {
+  const target = new URL(page.canonicalPath, Astro.url);
+  target.search = Astro.url.search;
+  return Astro.redirect(`${target.pathname}${target.search}`, 308);
+}
+const pages = loadPages();
+---
+
+<BaseLayout title={`${page.data.title} | かめぱわぁ〜るど`} description={page.data.heroLead} canonicalPath={page.canonicalPath}>
+  <GuidePage page={page} pages={pages} />
+</BaseLayout>

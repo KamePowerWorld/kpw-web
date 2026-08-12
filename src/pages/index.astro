@@ -1,15 +1,15 @@
 ---
-export const prerender = true;
+export const prerender = false;
 
 import GuidePage from "../components/GuidePage.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
-import { loadPage, loadPages } from "../lib/content";
+import { loadPages, resolvePagePath } from "../lib/content";
 
 const pages = loadPages();
-const page = loadPage("guide") ?? pages[0];
-if (!page) throw new Error("No published documentation pages were found.");
+const page = resolvePagePath("/");
+if (!page) throw new Error("pages/index/index.md is required.");
 ---
 
-<BaseLayout title={page.data.title} description={page.data.description}>
+<BaseLayout title={page.data.title} description={page.data.heroLead} canonicalPath="/">
   <GuidePage page={page} pages={pages} />
 </BaseLayout>

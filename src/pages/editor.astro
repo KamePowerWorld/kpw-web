@@ -1,13 +1,14 @@
 ---
-export const prerender = true;
+export const prerender = false;
 
 import EditorApp from "../components/EditorApp";
 import BaseLayout from "../layouts/BaseLayout.astro";
-import { loadPages } from "../lib/content";
+import { loadNavigation, loadPages } from "../lib/content";
 
-const docs = loadPages({ includeDrafts: true }).map(({ slug, filePath, body, data }) => ({ slug, filePath, body, data }));
+const docs = loadPages({ includeDrafts: true }).map(({ id, slug, filePath, body, data, canonicalPath, parentId, childIds, depth }) => ({ id, slug, filePath, body, data, canonicalPath, parentId, childIds, depth }));
+const navigation = loadNavigation();
 ---
 
 <BaseLayout title="ガイドエディター | かめぱわぁ〜るど" description="GitHubとつながるWYSIWYG Markdownエディター" bodyClass="editor-page">
-  <EditorApp client:only="react" initialDocs={docs} />
+  <EditorApp client:only="react" initialDocs={docs} initialNavigation={navigation} />
 </BaseLayout>

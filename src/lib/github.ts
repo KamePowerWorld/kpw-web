@@ -1,16 +1,7 @@
 import { env } from "cloudflare:workers";
 
-export interface CloudflareEnv {
-  ASSETS: Fetcher;
-  SESSIONS: KVNamespace;
-  GITHUB_CLIENT_ID: string;
-  GITHUB_CLIENT_SECRET: string;
-  GITHUB_OWNER?: string;
-  GITHUB_REPO?: string;
-  GITHUB_BRANCH?: string;
-}
-
-export const runtimeEnv = env as unknown as CloudflareEnv;
+export type CloudflareEnv = Env;
+export const runtimeEnv = env as CloudflareEnv;
 
 export interface GitHubSession {
   accessToken: string;
