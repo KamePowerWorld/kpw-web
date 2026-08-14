@@ -34,31 +34,33 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
     </nav>
   </header>
 
-  <details class="mobile-page-tree" id="mobile-page-navigation" open>
-    <summary>ページを探す</summary>
-    <nav>
-      <a class:list={["tree-link", { active: page.slug === "index" }]} href="/">トップ</a>
-      {visibleTreePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id, "has-children": item.childIds.length > 0 }]} aria-current={item.id === page.id ? "page" : undefined} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
+  <div class:list={["hero-region", { "hero-region-2026": isLifeServer }]}>
+    <details class="mobile-page-tree" id="mobile-page-navigation">
+      <summary>ページを探す</summary>
+      <nav>
+        <a class:list={["tree-link", { active: page.slug === "index" }]} href="/">トップ</a>
+        {visibleTreePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id, "has-children": item.childIds.length > 0 }]} aria-current={item.id === page.id ? "page" : undefined} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
+      </nav>
+    </details>
+
+    <nav class="breadcrumbs" aria-label="パンくず">
+      <a href="/">トップ</a>
+      {breadcrumbs.map((item) => <><span>›</span><a href={item.canonicalPath}>{item.data.title}</a></>)}
+      {page.slug !== "index" && <><span>›</span><strong>{page.data.title}</strong></>}
     </nav>
-  </details>
 
-  <nav class="breadcrumbs" aria-label="パンくず">
-    <a href="/">トップ</a>
-    {breadcrumbs.map((item) => <><span>›</span><a href={item.canonicalPath}>{item.data.title}</a></>)}
-    {page.slug !== "index" && <><span>›</span><strong>{page.data.title}</strong></>}
-  </nav>
-
-  <section class:list={["hero", { "hero-2026": isLifeServer }]}>
-    <div class="confetti c1">●</div><div class="confetti c2">◆</div><div class="confetti c3">▲</div><div class="confetti c4">●</div>
-    <div class="hero-copy">
-      <h1>{page.data.title}</h1><p class="lead">{page.data.heroLead}</p>
-      <a class="hero-button" href={`#${firstHeading}`}>ガイドを見てみる <span>→</span></a>
-    </div>
-    <div class:list={["hero-art", { "hero-poster": Boolean(page.heroImageUrl) }]}>
-      <div class="speech">いっしょに遊ぼ！</div>
-      <img src={page.heroImageUrl ?? mascotDataUrl} alt={page.heroImageUrl ? page.data.title : "かめっち"} />
-    </div>
-  </section>
+    <section class:list={["hero", { "hero-2026": isLifeServer }]}>
+      <div class="confetti c1">●</div><div class="confetti c2">◆</div><div class="confetti c3">▲</div><div class="confetti c4">●</div>
+      <div class="hero-copy">
+        <h1>{page.data.title}</h1><p class="lead">{page.data.heroLead}</p>
+        <a class="hero-button" href={`#${firstHeading}`}>ガイドを見てみる <span>→</span></a>
+      </div>
+      <div class:list={["hero-art", { "hero-poster": Boolean(page.heroImageUrl) }]}>
+        <div class="speech">いっしょに遊ぼ！</div>
+        <img src={page.heroImageUrl ?? mascotDataUrl} alt={page.heroImageUrl ? page.data.title : "かめっち"} />
+      </div>
+    </section>
+  </div>
 
   <div class="ticker" aria-label={page.data.title}><div>★ KAMEPOWER WORLD ★ {page.data.title} ★ PLAY ・ CREATE ・ ENJOY ★</div></div>
   <div class="page-shell">
@@ -94,4 +96,18 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
   };
   updateActiveHeading();
   document.addEventListener("scroll", updateActiveHeading, { passive: true });
+
+  const mobilePageLink = document.querySelector<HTMLAnchorElement>(".mobile-nav-link");
+  const mobilePageTree = document.querySelector<HTMLDetailsElement>("#mobile-page-navigation");
+  mobilePageLink?.addEventListener("click", (event) => {
+    if (!mobilePageTree || getComputedStyle(mobilePageLink).display === "none") return;
+    event.preventDefault();
+    mobilePageTree.open = true;
+    mobilePageTree.classList.remove("is-highlighted");
+    void mobilePageTree.offsetWidth;
+    mobilePageTree.classList.add("is-highlighted");
+    history.replaceState(null, "", "#mobile-page-navigation");
+    mobilePageTree.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  mobilePageTree?.addEventListener("animationend", () => mobilePageTree.classList.remove("is-highlighted"));
 </script>
