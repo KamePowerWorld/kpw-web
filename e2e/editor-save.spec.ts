@@ -41,7 +41,7 @@ test("publishing a private page survives an immediate reload", async ({ page }) 
   await expect(draft).toBeChecked();
   await draft.uncheck();
   await expect(draft).not.toBeChecked();
-  await page.getByRole("button", { name: /変更をまとめて保存/ }).click();
+  await page.getByRole("button", { name: /保存＆公開/ }).click();
   await expect(page.getByRole("dialog", { name: "変更内容を確認" })).toBeVisible();
   await expect(page.locator(".diff-added")).toContainText("draft: false");
   await expect(page.locator(".diff-removed")).toContainText("draft: true");
@@ -57,7 +57,7 @@ test("save review uses folded hunks and one review scrollbar", async ({ page }) 
   await page.goto(`/editor?page=${pageId}`);
   await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
   await page.getByRole("textbox", { name: "タイトル" }).fill("変更したテスト");
-  await page.getByRole("button", { name: /変更をまとめて保存/ }).click();
+  await page.getByRole("button", { name: /保存＆公開/ }).click();
   const review = page.getByRole("dialog", { name: "変更内容を確認" });
   await expect(review).toBeVisible();
   const fold = review.getByRole("button", { name: /未変更の\d+行を表示/ }).first();
@@ -82,7 +82,7 @@ test("multiple file hunks keep their full height and share one scrollbar", async
   await page.locator(".index-page").click();
   await page.getByRole("textbox", { name: "タイトル" }).fill("変更したトップ");
 
-  await page.getByRole("button", { name: /変更をまとめて保存/ }).click();
+  await page.getByRole("button", { name: /保存＆公開/ }).click();
   const review = page.getByRole("dialog", { name: "変更内容を確認" });
   const body = review.locator(".save-review-body");
   const cards = body.locator(".diff-card");
@@ -102,21 +102,21 @@ test("reverted edits and a cancelled new page are no longer changes", async ({ p
   const title = page.getByRole("textbox", { name: "タイトル" });
   await expect(title).toHaveValue("テスト");
   await title.fill("変更したタイトル");
-  await expect(page.getByRole("button", { name: /変更をまとめて保存 \(1\)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /保存＆公開 \(1\)/ })).toBeVisible();
   await title.fill("テスト");
-  await expect(page.getByRole("button", { name: "変更をまとめて保存" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存＆公開" })).toBeVisible();
 
   const answers = ["一時ページ", "temporary-page"];
   page.on("dialog", async (dialog) => dialog.accept(answers.shift()));
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
   await page.getByRole("button", { name: "＋ ルートに追加" }).click();
-  await expect(page.getByRole("button", { name: /変更をまとめて保存/ })).toContainText("(2)");
+  await expect(page.getByRole("button", { name: /保存＆公開/ })).toContainText("(2)");
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
   const selectedRow = page.locator(".explorer-row.selected");
   await selectedRow.hover();
   await selectedRow.getByTitle("削除").click();
   await page.getByRole("button", { name: "削除する" }).click();
-  await expect(page.getByRole("button", { name: "変更をまとめて保存" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存＆公開" })).toBeVisible();
 });
 
 test("page and workspace discard actions require confirmation", async ({ page, isMobile }) => {
@@ -142,6 +142,46 @@ test("page and workspace discard actions require confirmation", async ({ page, i
   await page.getByRole("button", { name: "すべて破棄" }).click();
   await expect(title).toHaveValue("テスト");
   await expect(page.locator(".swal2-toast")).toContainText("すべての変更を破棄しました");
+});
+
+test("mobile editor controls form two compact header rows and three metadata rows", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "スマホ専用レイアウトの確認");
+  await page.goto(`/editor?page=${pageId}`);
+  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+
+  const box = async (selector: string) => {
+    const value = await page.locator(selector).boundingBox();
+    expect(value).not.toBeNull();
+    return value!;
+  };
+  const brand = await box(".editor-brand");
+  const session = await box(".editor-session");
+  const pagesButton = await box(".explorer-toggle");
+  const viewButton = await box(".topbar-view-page");
+  const saveButton = await box(".publish-button");
+
+  expect(Math.abs(brand.y + brand.height / 2 - (session.y + session.height / 2))).toBeLessThan(6);
+  expect(Math.max(pagesButton.y, viewButton.y, saveButton.y) - Math.min(pagesButton.y, viewButton.y, saveButton.y)).toBeLessThan(3);
+  expect(Math.max(pagesButton.height, viewButton.height, saveButton.height) - Math.min(pagesButton.height, viewButton.height, saveButton.height)).toBeLessThan(3);
+  expect(pagesButton.x + pagesButton.width).toBeLessThanOrEqual(viewButton.x);
+  expect(viewButton.x + viewButton.width).toBeLessThanOrEqual(saveButton.x);
+  await expect(page.getByRole("button", { name: "保存＆公開" })).toBeVisible();
+
+  const titleInput = await page.getByRole("textbox", { name: "タイトル" }).boundingBox();
+  const discardButton = await box(".discard-page-button");
+  const leadInput = await page.getByRole("textbox", { name: "リード文" }).boundingBox();
+  const meta = await box(".editor-meta");
+  expect(titleInput).not.toBeNull();
+  expect(leadInput).not.toBeNull();
+  expect(Math.abs(titleInput!.y - discardButton.y)).toBeLessThan(6);
+  expect(titleInput!.x + titleInput!.width).toBeLessThanOrEqual(discardButton.x);
+  expect(leadInput!.width).toBeGreaterThan(meta.width - 30);
+
+  const draft = await page.getByRole("checkbox", { name: "まだ非公開" }).boundingBox();
+  const source = await page.getByRole("switch", { name: "Markdownソース" }).boundingBox();
+  expect(draft).not.toBeNull();
+  expect(source).not.toBeNull();
+  expect(Math.abs(draft!.y + draft!.height / 2 - (source!.y + source!.height / 2))).toBeLessThan(6);
 });
 
 test("mobile workspace fills the viewport without trailing app padding", async ({ page, isMobile }) => {

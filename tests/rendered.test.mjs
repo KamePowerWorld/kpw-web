@@ -51,7 +51,7 @@ test("editor and Worker entrypoints are built", () => {
 
 test("tree, batch save, slug reuse, and deletion policies are present", () => {
   const editor = readFileSync("src/components/EditorApp.tsx", "utf8"); const save = readFileSync("src/pages/api/github/save.ts", "utf8");
-  assert.match(editor, /変更をまとめて保存/); assert.match(editor, /子ページがあるため削除できません/); assert.match(editor, /releaseAlias/); assert.match(editor, /indexedDB/);
+  assert.match(editor, /保存＆公開/); assert.match(editor, /子ページがあるため削除できません/); assert.match(editor, /releaseAlias/); assert.match(editor, /indexedDB/);
   assert.match(save, /sha: null/); assert.match(save, /navigation\.yml/); assert.match(save, /expectedCommitSha/);
 });
 

@@ -565,7 +565,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       <button className="explorer-toggle" onClick={() => setExplorerOpen((value) => !value)}>☰ ページ</button>
       <a className="topbar-view-page" href={current.canonicalPath} target="_blank" rel="noreferrer">ページを見る ↗</a>
       <div className="editor-session">{session.authenticated ? <><img src={session.user?.avatarUrl} alt="" /><span>{session.user?.login}</span></> : <a href="/api/auth/login">GitHubでログイン</a>}</div>
-      <button className="publish-button" disabled={saving} onClick={openSaveReview}>{saving ? "保存中…" : session.installationReady === false ? "GitHub Appを設定" : `変更をまとめて保存${dirtyIds.size || treeDirty ? ` (${dirtyIds.size + (treeDirty ? 1 : 0)})` : ""}`}</button>
+      <button className="publish-button" disabled={saving} onClick={openSaveReview}>{saving ? "保存中…" : session.installationReady === false ? "GitHub Appを設定" : `保存＆公開${dirtyIds.size || treeDirty ? ` (${dirtyIds.size + (treeDirty ? 1 : 0)})` : ""}`}</button>
       <span className="sr-status" role="status" aria-live="polite">{status}</span>
     </header>
     <div className="editor-layout">
