@@ -58,7 +58,7 @@ jobs:
           KPW_DOCS_DIR: ${{ github.workspace }}/docs
       - name: Deploy to Cloudflare Workers
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
-        run: npx wrangler deploy --config dist/server/wrangler.json
+        run: npx wrangler deploy --config dist/server/wrangler.json --keep-vars
         working-directory: web
       - name: Report pending Cloudflare setup
         if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''

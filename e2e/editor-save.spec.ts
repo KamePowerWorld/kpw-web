@@ -1,28 +1,35 @@
 import { expect, test } from "@playwright/test";
 
 const pageId = "29b1b24f-7a2a-422e-86c3-38cd942715f1";
+const indexPageId = "01dc1c48-1880-42a5-ab8b-1777262840c2";
 const csrfToken = "e2e-csrf-token";
 const commitBefore = "1".repeat(40);
 const commitAfter = "2".repeat(40);
 const navigation = `version: 1\ntree:\n  - id: cad50ce0-15f4-4d04-8e5b-74950c59fe47\n    children:\n      - id: ${pageId}\n`;
+type TestAccess = { canEdit: boolean; canCreateChildren: boolean; childMode: "inherit" | "custom" | null; canManage: boolean; canManageStructure: boolean; inheritedFrom: string | null };
 let remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n# テスト\n`;
 let remoteCommit = commitBefore;
+const fullAccess: TestAccess = { canEdit: true, canCreateChildren: true, childMode: "custom", canManage: true, canManageStructure: true, inheritedFrom: null };
+let testPageAccess: TestAccess = fullAccess;
+let savedPermissionBody: unknown;
 
 test.beforeEach(async ({ page }) => {
   remoteContent = remoteContent.replace("draft: false", "draft: true");
   remoteCommit = commitBefore;
-  await page.route("**/api/github/session", (route) => route.fulfill({ json: {
-    authenticated: true, canPush: true, installationReady: true, csrfToken,
-    user: { login: "e2e-user", name: "E2E", avatarUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" },
+  testPageAccess = fullAccess; savedPermissionBody = undefined;
+  await page.route("**/api/editor/session", (route) => route.fulfill({ json: {
+    authenticated: true, isAdmin: true, csrfToken,
+    user: { id: "100000000000000001", username: "e2e-user", displayName: "E2E", avatarUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" },
   } }));
-  await page.route("**/api/github/workspace", (route) => route.fulfill({ json: {
+  await page.route("**/api/editor/workspace", (route) => route.fulfill({ json: {
     pages: [
       { slug: "index", filePath: "pages/index/index.md", content: `---\nid: 01dc1c48-1880-42a5-ab8b-1777262840c2\ntitle: トップ\ndraft: false\nheroLead: トップです\n---\n\n# トップ\n` },
       { slug: "2026-poikatsu", filePath: "pages/2026-poikatsu/index.md", content: `---\nid: cad50ce0-15f4-4d04-8e5b-74950c59fe47\ntitle: ポイ活\ndraft: false\nheroLead: ポイ活です\n---\n\n# ポイ活\n` },
       { slug: "testtest", filePath: "pages/testtest/index.md", content: remoteContent },
     ], navigation, baseCommitSha: remoteCommit,
+    access: { "01dc1c48-1880-42a5-ab8b-1777262840c2": fullAccess, "cad50ce0-15f4-4d04-8e5b-74950c59fe47": fullAccess, [pageId]: testPageAccess },
   } }));
-  await page.route("**/api/github/save", async (route) => {
+  await page.route("**/api/editor/save", async (route) => {
     const request = route.request();
     expect(request.headers()["x-csrf-token"]).toBe(csrfToken);
     const body = request.postDataJSON();
@@ -31,12 +38,51 @@ test.beforeEach(async ({ page }) => {
     remoteContent = changed.content; remoteCommit = commitAfter;
     await route.fulfill({ json: { mode: "direct", commitSha: commitAfter, redirectUrl: "/editor" } });
   });
+  await page.route(`**/api/editor/pages/${pageId}/permissions`, async (route) => {
+    if (route.request().method() === "PUT") { savedPermissionBody = route.request().postDataJSON(); await route.fulfill({ json: { ok: true } }); return; }
+    await route.fulfill({ json: { policy: { pageId, accessMode: "inherit", creatorUserId: null, managerUserId: null, revision: 1, grants: [] } } });
+  });
+  await page.route(`**/api/editor/pages/${indexPageId}/permissions`, async (route) => {
+    if (route.request().method() === "PUT") { savedPermissionBody = route.request().postDataJSON(); await route.fulfill({ json: { ok: true } }); return; }
+    await route.fulfill({ json: { policy: { pageId: indexPageId, accessMode: "inherit", creatorUserId: null, managerUserId: null, revision: 1, grants: [] } } });
+  });
+  await page.route("**/api/discord/roles?*", (route) => route.fulfill({ json: { roles: [{ id: "200000000000000001", name: "editor", color: 65280 }] } }));
+  await page.route("**/api/discord/members?*", (route) => route.fulfill({ json: { members: [{ id: "300000000000000001", name: "かめさん", username: "kame", avatarUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" }] } }));
+});
+
+test("a Discord member without access sees a read-only page", async ({ page }) => {
+  testPageAccess = { canEdit: false, canCreateChildren: false, childMode: null, canManage: false, canManageStructure: false, inheritedFrom: null };
+  await page.goto(`/editor?page=${pageId}`);
+  await expect(page.getByText("このページは読み取り専用です")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "タイトル" })).toBeDisabled();
+  await expect(page.getByRole("checkbox", { name: "まだ非公開" })).toBeDisabled();
+});
+
+test("a page manager can assign a Discord role in the permission dialog", async ({ page, isMobile }) => {
+  await page.goto(`/editor?page=${pageId}`);
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const row = page.locator(".explorer-row", { hasText: "テスト" }); await row.hover();
+  await row.getByRole("button", { name: "権限を設定" }).click();
+  const dialog = page.getByRole("dialog", { name: "テスト" }); await expect(dialog).toBeVisible();
+  await dialog.getByLabel("権限の基準").selectOption("custom");
+  await dialog.locator(".permission-add select").selectOption("200000000000000001");
+  await dialog.getByRole("button", { name: "ロールを追加" }).click();
+  await dialog.getByRole("button", { name: "権限を保存" }).click();
+  await expect.poll(() => savedPermissionBody).not.toBeUndefined();
+  expect(savedPermissionBody).toMatchObject({ accessMode: "custom", grants: [{ subjectType: "role", subjectId: "200000000000000001", canEdit: true }] });
+});
+
+test("an admin can open permissions for the top page", async ({ page, isMobile }) => {
+  await page.goto("/editor");
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  await page.getByRole("button", { name: "トップページの権限を設定" }).click();
+  await expect(page.getByRole("dialog", { name: "トップ" })).toBeVisible();
 });
 
 test("publishing a private page survives an immediate reload", async ({ page }) => {
   await page.goto(`/editor?page=${pageId}`);
   const status = page.locator(".sr-status");
-  await expect(status).toContainText("GitHub上の最新版");
+  await expect(status).toContainText("公開側の最新版");
   const draft = page.getByRole("checkbox", { name: "まだ非公開" });
   await expect(draft).toBeChecked();
   await draft.uncheck();
@@ -46,16 +92,16 @@ test("publishing a private page survives an immediate reload", async ({ page }) 
   await expect(page.locator(".diff-added")).toContainText("draft: false");
   await expect(page.locator(".diff-removed")).toContainText("draft: true");
   await page.getByRole("button", { name: "この内容で保存" }).click();
-  await expect(status).toContainText("GitHubへ保存しました");
+  await expect(status).toContainText("保存しました");
   await page.reload();
   await expect(page.getByRole("checkbox", { name: "まだ非公開" })).not.toBeChecked();
-  await expect(status).toContainText(/保存したGitHub上の最新版|GitHub上の最新版/);
+  await expect(status).toContainText(/保存した最新版|公開側の最新版/);
 });
 
 test("save review uses folded hunks and one review scrollbar", async ({ page }) => {
   remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n${Array.from({ length: 40 }, (_, index) => `変更前ではない行 ${index + 1}`).join("\n")}\n`;
   await page.goto(`/editor?page=${pageId}`);
-  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+  await expect(page.locator(".sr-status")).toContainText("公開側の最新版");
   await page.getByRole("textbox", { name: "タイトル" }).fill("変更したテスト");
   await page.getByRole("button", { name: /保存＆公開/ }).click();
   const review = page.getByRole("dialog", { name: "変更内容を確認" });
@@ -71,7 +117,7 @@ test("save review uses folded hunks and one review scrollbar", async ({ page }) 
 test("multiple file hunks keep their full height and share one scrollbar", async ({ page, isMobile }) => {
   remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n# テスト\n`;
   await page.goto(`/editor?page=${pageId}`);
-  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+  await expect(page.locator(".sr-status")).toContainText("公開側の最新版");
   await page.getByRole("textbox", { name: "タイトル" }).fill("変更したテスト");
 
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
@@ -147,7 +193,7 @@ test("page and workspace discard actions require confirmation", async ({ page, i
 test("mobile editor controls form two compact header rows and three metadata rows", async ({ page, isMobile }) => {
   test.skip(!isMobile, "スマホ専用レイアウトの確認");
   await page.goto(`/editor?page=${pageId}`);
-  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+  await expect(page.locator(".sr-status")).toContainText("公開側の最新版");
 
   const box = async (selector: string) => {
     const value = await page.locator(selector).boundingBox();
@@ -188,7 +234,7 @@ test("desktop metadata stays horizontal without overflowing at laptop width", as
   test.skip(isMobile, "PC専用レイアウトの確認");
   await page.setViewportSize({ width: 1024, height: 720 });
   await page.goto(`/editor?page=${pageId}`);
-  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+  await expect(page.locator(".sr-status")).toContainText("公開側の最新版");
 
   const meta = page.locator(".editor-meta");
   const geometry = await meta.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));

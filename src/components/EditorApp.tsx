@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
-import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
+import { editorViewOptionsCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import DOMPurify from "dompurify";
 import { diffLines, type Change } from "diff";
 import { marked } from "marked";
@@ -29,19 +29,22 @@ type DocSummary = {
 type PageDraft = DocSummary & { originalSlug?: string; assets: AssetDraft[]; deleted?: boolean; isNew?: boolean };
 type AssetDraft = { name: string; contentBase64: string; mime: string };
 type Session = {
-  authenticated: boolean; canPush?: boolean; installationReady?: boolean; installationUrl?: string; csrfToken?: string;
-  user?: { login: string; name: string | null; avatarUrl: string };
+  authenticated: boolean; isAdmin?: boolean; csrfToken?: string;
+  user?: { id: string; username: string; displayName: string; avatarUrl: string };
 };
-type WorkspaceResponse = { pages: Array<{ slug: string; filePath: string; content: string }>; navigation: string; baseCommitSha: string; error?: string };
-type SaveResponse = { mode?: "direct" | "pull-request"; redirectUrl?: string; actionUrl?: string; commitSha?: string; error?: string };
+type PageAccess = { canEdit: boolean; canCreateChildren: boolean; childMode: "inherit" | "custom" | null; canManage: boolean; canManageStructure: boolean; inheritedFrom: string | null };
+type WorkspaceResponse = { pages: Array<{ slug: string; filePath: string; content: string }>; navigation: string; baseCommitSha: string; access: Record<string, PageAccess>; error?: string };
+type SaveResponse = { mode?: "direct"; redirectUrl?: string; commitSha?: string; partial?: boolean; error?: string };
+type PageGrant = { subjectType: "role" | "user"; subjectId: string; canEdit: boolean; createChildrenMode: "inherit" | "custom" | null };
+type PagePolicy = { pageId: string; accessMode: "inherit" | "custom"; creatorUserId: string | null; managerUserId: string | null; revision: number; grants: PageGrant[] };
 type PersistedWorkspace = {
   pages: PageDraft[]; navigation: Navigation; dirtyIds: string[]; treeDirty: boolean; baseCommitSha?: string; selectedId: string;
   baselinePages?: PageDraft[]; baselineNavigation?: Navigation;
 };
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const workspaceStorageKey = "current";
-const lastSavedCommitKey = "kpw-editor:last-saved-commit";
+const workspaceStorageKey = (userId: string) => `discord:${userId}`;
+const lastSavedCommitKey = (userId: string) => `kpw-editor:last-saved-commit:${userId}`;
 
 function parseDocument(source: string, slug: string): PageDraft {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -105,25 +108,25 @@ function openWorkspaceDb() {
   });
 }
 
-async function readPersistedWorkspace(): Promise<PersistedWorkspace | undefined> {
+async function readPersistedWorkspace(userId: string): Promise<PersistedWorkspace | undefined> {
   const db = await openWorkspaceDb();
   return await new Promise((resolve, reject) => {
-    const request = db.transaction("workspace").objectStore("workspace").get(workspaceStorageKey);
+    const request = db.transaction("workspace").objectStore("workspace").get(workspaceStorageKey(userId));
     request.onsuccess = () => resolve(request.result as PersistedWorkspace | undefined); request.onerror = () => reject(request.error);
   });
 }
 
-async function writePersistedWorkspace(value?: PersistedWorkspace) {
+async function writePersistedWorkspace(userId: string, value?: PersistedWorkspace) {
   const db = await openWorkspaceDb();
   await new Promise<void>((resolve, reject) => {
     const store = db.transaction("workspace", "readwrite").objectStore("workspace");
-    const request = value ? store.put(value, workspaceStorageKey) : store.delete(workspaceStorageKey);
+    const request = value ? store.put(value, workspaceStorageKey(userId)) : store.delete(workspaceStorageKey(userId));
     request.onsuccess = () => resolve(); request.onerror = () => reject(request.error);
   });
 }
 
-function MilkdownSurface({ value, onChange, onUpload, resolveImage }: {
-  value: string; onChange: (value: string) => void; onUpload: (file: File) => Promise<string>; resolveImage: (url: string) => string;
+function MilkdownSurface({ value, onChange, onUpload, resolveImage, readOnly }: {
+  value: string; onChange: (value: string) => void; onUpload: (file: File) => Promise<string>; resolveImage: (url: string) => string; readOnly?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const uploadRef = useRef(onUpload);
@@ -143,11 +146,12 @@ function MilkdownSurface({ value, onChange, onUpload, resolveImage }: {
     crepe.editor.config((ctx) => ctx.update(remarkStringifyOptionsCtx, (options) => ({
       ...options, bullet: "-" as const, rule: "-" as const, ruleRepetition: 3, ruleSpaces: false,
     })));
+    crepe.editor.config((ctx) => ctx.update(editorViewOptionsCtx, (options) => ({ ...options, editable: () => !readOnly })));
     crepe.on((listener) => listener.markdownUpdated((_ctx, markdown) => { if (markdown !== value) onChange(markdown); }));
     void crepe.create();
     return () => { void crepe.destroy(); };
-  }, []);
-  return <div className="milkdown-host" ref={root} />;
+  }, [readOnly]);
+  return <div className={`milkdown-host ${readOnly ? "read-only" : ""}`} ref={root} />;
 }
 
 type DiffRow = {
@@ -221,16 +225,70 @@ async function fileToDraft(file: File): Promise<AssetDraft> {
   return { name: file.name.replace(/[^A-Za-z0-9._-]/g, "-"), contentBase64: btoa(binary), mime: file.type };
 }
 
-function SortablePage({ page, selected, dirty, onSelect, onAdd, onRename, onDelete, onIndent, onOutdent }: {
-  page: PageDraft; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void;
-  onIndent: () => void; onOutdent: () => void;
+function SortablePage({ page, access, selected, dirty, onSelect, onAdd, onRename, onDelete, onIndent, onOutdent, onPermissions }: {
+  page: PageDraft; access: PageAccess; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void;
+  onIndent: () => void; onOutdent: () => void; onPermissions: () => void;
 }) {
-  const sortable = useSortable({ id: page.id });
+  const sortable = useSortable({ id: page.id, disabled: !access.canManageStructure });
   return <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth } as React.CSSProperties}
     className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""}`}>
-    <button className="drag-handle" {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}>⠿</button>
+    <button className="drag-handle" disabled={!access.canManageStructure} {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}>⠿</button>
     <button className="page-name" onClick={onSelect}>{dirty && <span className="dirty-dot" aria-label="変更済み">●</span>}{page.data.draft && <span aria-label="まだ非公開">◇</span>}{page.data.title}</button>
-    <div className="row-actions"><button onClick={onOutdent} title="ひとつ外側へ" aria-label="ひとつ外側へ">←</button><button onClick={onIndent} title="ひとつ内側へ" aria-label="ひとつ内側へ">→</button><button onClick={onAdd} title="子ページを追加">＋</button><button onClick={onRename} title="slugを変更">⋯</button><button onClick={onDelete} title="削除">×</button></div>
+    <div className="row-actions"><button disabled={!access.canManageStructure} onClick={onOutdent} title="ひとつ外側へ" aria-label="ひとつ外側へ">←</button><button disabled={!access.canManageStructure} onClick={onIndent} title="ひとつ内側へ" aria-label="ひとつ内側へ">→</button><button disabled={!access.canCreateChildren} onClick={onAdd} title="子ページを追加">＋</button><button disabled={!access.canManageStructure} onClick={onRename} title="slugを変更">⋯</button><button disabled={!access.canManageStructure} onClick={onDelete} title="削除">×</button>{access.canManage && <button onClick={onPermissions} title="権限を設定" aria-label="権限を設定">鍵</button>}</div>
+  </div>;
+}
+
+function PermissionsDialog({ page, csrfToken, onClose, onSaved }: { page: PageDraft; csrfToken: string; onClose: () => void; onSaved: () => void }) {
+  const [policy, setPolicy] = useState<PagePolicy>();
+  const [roles, setRoles] = useState<Array<{ id: string; name: string }>>([]);
+  const [roleId, setRoleId] = useState("");
+  const [query, setQuery] = useState("");
+  const [members, setMembers] = useState<Array<{ id: string; name: string; username: string; avatarUrl: string }>>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void Promise.all([
+      fetch(`/api/editor/pages/${page.id}/permissions`).then((response) => response.json() as Promise<{ policy?: PagePolicy }>),
+      fetch(`/api/discord/roles?pageId=${page.id}`).then((response) => response.json() as Promise<{ roles?: Array<{ id: string; name: string }> }>),
+    ]).then(([permissionResult, roleResult]) => { setPolicy(permissionResult.policy); setRoles(roleResult.roles ?? []); });
+  }, [page.id]);
+  const addGrant = (subjectType: "role" | "user", subjectId: string) => {
+    if (!policy || policy.grants.some((grant) => grant.subjectType === subjectType && grant.subjectId === subjectId)) return;
+    setPolicy({ ...policy, accessMode: "custom", grants: [...policy.grants, { subjectType, subjectId, canEdit: true, createChildrenMode: null }] });
+  };
+  const updateGrant = (index: number, update: Partial<PageGrant>) => policy && setPolicy({ ...policy, grants: policy.grants.map((grant, position) => position === index ? { ...grant, ...update } : grant) });
+  const search = async () => {
+    if (query.trim().length < 2) return;
+    const result = await fetch(`/api/discord/members?pageId=${page.id}&query=${encodeURIComponent(query.trim())}`).then((response) => response.json() as Promise<{ members?: Array<{ id: string; name: string; username: string; avatarUrl: string }> }>);
+    setMembers(result.members ?? []);
+  };
+  const save = async () => {
+    if (!policy) return; setBusy(true);
+    const response = await fetch(`/api/editor/pages/${page.id}/permissions`, { method: "PUT", headers: { "content-type": "application/json", "x-csrf-token": csrfToken }, body: JSON.stringify({ accessMode: policy.accessMode, expectedRevision: policy.revision, grants: policy.grants }) });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) { setBusy(false); await Swal.fire({ icon: "error", title: "保存できませんでした", text: result.error }); return; }
+    await Swal.fire({ toast: true, position: "bottom-end", timer: 1800, showConfirmButton: false, icon: "success", title: "ページ権限を保存しました" });
+    onSaved();
+  };
+  return <div className="permission-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="permission-dialog" role="dialog" aria-modal="true" aria-labelledby="permission-title">
+      <header><div><span>ページ権限</span><h2 id="permission-title">{page.data.title}</h2></div><button aria-label="閉じる" onClick={onClose}>×</button></header>
+      {!policy ? <p className="permission-loading">読み込み中…</p> : <div className="permission-body">
+        {policy.managerUserId && <p className="permission-owner">作成者管理：Discord User {policy.managerUserId}</p>}
+        <label>権限の基準<select value={policy.accessMode} onChange={(event) => setPolicy({ ...policy, accessMode: event.target.value as "inherit" | "custom" })}><option value="inherit">親ページからライブ継承</option><option value="custom">このページで個別設定</option></select></label>
+        {policy.accessMode === "custom" && <>
+          <div className="permission-add"><select value={roleId} onChange={(event) => setRoleId(event.target.value)}><option value="">ロールを選択</option>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select><button disabled={!roleId} onClick={() => { addGrant("role", roleId); setRoleId(""); }}>ロールを追加</button></div>
+          <div className="permission-add"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="メンバー名を2文字以上入力" /><button onClick={() => void search()}>検索</button></div>
+          {members.length > 0 && <div className="member-results">{members.map((member) => <button key={member.id} onClick={() => addGrant("user", member.id)}><img src={member.avatarUrl} alt="" />{member.name}<small>@{member.username}</small></button>)}</div>}
+          <div className="permission-grants">{policy.grants.map((grant, index) => <div className="permission-grant" key={`${grant.subjectType}:${grant.subjectId}`}>
+            <strong>{grant.subjectType === "role" ? `@${roles.find((role) => role.id === grant.subjectId)?.name ?? grant.subjectId}` : `個人 ${grant.subjectId}`}</strong>
+            <label><input type="checkbox" checked={grant.canEdit} onChange={(event) => updateGrant(index, { canEdit: event.target.checked })} />このページを編集</label>
+            <label>子ページ作成<select value={grant.createChildrenMode ?? "none"} onChange={(event) => updateGrant(index, { createChildrenMode: event.target.value === "none" ? null : event.target.value as "inherit" | "custom" })}><option value="none">許可しない</option><option value="inherit">権限を継承</option><option value="custom">作成者がカスタム可能</option></select></label>
+            <button className="remove-grant" onClick={() => setPolicy({ ...policy, grants: policy.grants.filter((_, position) => position !== index) })}>削除</button>
+          </div>)}</div>
+        </>}
+      </div>}
+      <footer><button onClick={onClose}>キャンセル</button><button className="save-permissions" disabled={!policy || busy} onClick={() => void save()}>{busy ? "保存中…" : "権限を保存"}</button></footer>
+    </section>
   </div>;
 }
 
@@ -246,6 +304,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const [selectedId, setSelectedId] = useState(requestedId ?? initialPages.find((page) => page.slug === "index")?.id ?? initialPages[0]?.id ?? "");
   const [hydrated, setHydrated] = useState(false);
   const [session, setSession] = useState<Session>({ authenticated: false });
+  const [accessByPage, setAccessByPage] = useState<Record<string, PageAccess>>({});
   const [baseCommitSha, setBaseCommitSha] = useState<string>();
   const [status, setStatus] = useState("変更内容はこのブラウザに保存されます");
   const [saving, setSaving] = useState(false);
@@ -254,6 +313,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const [activePane, setActivePane] = useState<"edit" | "preview">("edit");
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [permissionPage, setPermissionPage] = useState<PageDraft>();
   const persistenceEpoch = useRef(0);
   const editorPaneRef = useRef<HTMLElement>(null);
   const previewPaneRef = useRef<HTMLElement>(null);
@@ -276,6 +336,8 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const treeDirty = navigationFingerprint(safeNavigation) !== navigationFingerprint(normalizeNavigation(baselineNavigation, baselineAllowedIds));
   const decorated = useMemo(() => decoratePages(pages, safeNavigation), [pages, safeNavigation]);
   const current = decorated.find((page) => page.id === selectedId && !page.deleted) ?? decorated.find((page) => page.slug === "index" && !page.deleted) ?? decorated.find((page) => !page.deleted);
+  const deniedAccess: PageAccess = { canEdit: false, canCreateChildren: false, childMode: null, canManage: false, canManageStructure: false, inheritedFrom: null };
+  const currentAccess = current ? accessByPage[current.id] ?? deniedAccess : deniedAccess;
   const flatTree = useMemo(() => flattenNavigation(safeNavigation.tree), [safeNavigation]);
   const treePages = flatTree.map((entry) => decorated.find((page) => page.id === entry.id)).filter((page): page is PageDraft => Boolean(page && !page.deleted));
   const deletedPages = pages.filter((page) => page.deleted);
@@ -287,7 +349,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   }, [status, hydrated]);
 
   useEffect(() => {
-    void Promise.all([fetch("/api/github/session").then((response) => response.json() as Promise<Session>), readPersistedWorkspace().catch(() => undefined)])
+    void fetch("/api/editor/session").then((response) => response.json() as Promise<Session>).then(async (nextSession) => [nextSession, nextSession.user ? await readPersistedWorkspace(nextSession.user.id).catch(() => undefined) : undefined] as const)
       .then(([nextSession, stored]) => {
         setSession(nextSession);
         if (stored) {
@@ -303,40 +365,42 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
 
   useEffect(() => {
     if (!hydrated || !session.authenticated) return;
-    void fetch("/api/github/workspace").then(async (response) => {
+    void fetch("/api/editor/workspace").then(async (response) => {
       const result = await response.json() as WorkspaceResponse; if (!response.ok) throw new Error(result.error); return result;
     }).then((result) => {
-      const lastSavedCommit = localStorage.getItem(lastSavedCommitKey);
+      setAccessByPage(result.access);
+      const userId = session.user!.id;
+      const lastSavedCommit = localStorage.getItem(lastSavedCommitKey(userId));
       if (lastSavedCommit === result.baseCommitSha) {
         persistenceEpoch.current += 1;
         const remotePages = result.pages.map((item) => parseDocument(item.content, item.slug));
         const remoteNavigation = parseYaml(result.navigation) as Navigation;
         const normalizedRemoteNavigation = normalizeNavigation(remoteNavigation, remotePages.filter((page) => page.slug !== "index").map((page) => page.id));
         setPages(remotePages); setNavigation(normalizedRemoteNavigation); setBaselinePages(remotePages); setBaselineNavigation(normalizedRemoteNavigation); setBaseCommitSha(result.baseCommitSha);
-        localStorage.removeItem(lastSavedCommitKey); void writePersistedWorkspace();
-        setStatus("保存したGitHub上の最新版を読み込みました"); return;
+        localStorage.removeItem(lastSavedCommitKey(userId)); void writePersistedWorkspace(userId);
+        setStatus("保存した最新版を読み込みました"); return;
       }
       if (dirtyIds.size || treeDirty) {
         if (!baseCommitSha) setBaseCommitSha(result.baseCommitSha);
-        setStatus("保存済みの編集内容を表示中です。GitHubの最新版は一括保存時に競合確認されます。"); return;
+        setStatus("保存済みの編集内容を表示中です。公開側の最新版は一括保存時に競合確認されます。"); return;
       }
       const remotePages = result.pages.map((item) => parseDocument(item.content, item.slug));
       const remoteNavigation = parseYaml(result.navigation) as Navigation;
       const normalizedRemoteNavigation = normalizeNavigation(remoteNavigation, remotePages.filter((page) => page.slug !== "index").map((page) => page.id));
-      setPages(remotePages); setNavigation(normalizedRemoteNavigation); setBaselinePages(remotePages); setBaselineNavigation(normalizedRemoteNavigation); setBaseCommitSha(result.baseCommitSha); setStatus("GitHub上の最新版を読み込みました");
+      setPages(remotePages); setNavigation(normalizedRemoteNavigation); setBaselinePages(remotePages); setBaselineNavigation(normalizedRemoteNavigation); setBaseCommitSha(result.baseCommitSha); setStatus("公開側の最新版を読み込みました");
     }).catch((error) => setStatus(`ローカル内容を表示中：${error instanceof Error ? error.message : "取得に失敗しました"}`));
   }, [hydrated, session.authenticated]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !session.user) return;
     const epoch = persistenceEpoch.current;
     const timer = window.setTimeout(() => {
       if (epoch !== persistenceEpoch.current) return;
       const hasChanges = dirtyIds.size > 0 || treeDirty;
-      void writePersistedWorkspace(hasChanges ? { pages, navigation: safeNavigation, dirtyIds: [...dirtyIds], treeDirty, baseCommitSha, selectedId, baselinePages, baselineNavigation } : undefined);
+      void writePersistedWorkspace(session.user!.id, hasChanges ? { pages, navigation: safeNavigation, dirtyIds: [...dirtyIds], treeDirty, baseCommitSha, selectedId, baselinePages, baselineNavigation } : undefined);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [pages, safeNavigation, dirtyIds, treeDirty, baseCommitSha, selectedId, hydrated, baselinePages, baselineNavigation]);
+  }, [pages, safeNavigation, dirtyIds, treeDirty, baseCommitSha, selectedId, hydrated, baselinePages, baselineNavigation, session.user?.id]);
 
   const updatePage = (id: string, updater: (page: PageDraft) => PageDraft) => {
     setPages((currentPages) => currentPages.map((page) => page.id === id ? updater(page) : page));
@@ -354,6 +418,10 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   };
 
   const createPage = (parentId?: string) => {
+    const index = pages.find((page) => page.slug === "index");
+    const effectiveParentId = parentId ?? index?.id;
+    const parentAccess = effectiveParentId ? accessByPage[effectiveParentId] : undefined;
+    if (!effectiveParentId || !parentAccess?.canCreateChildren || !parentAccess.childMode) { setStatus("この場所に子ページを作る権限がありません"); return; }
     const title = window.prompt("新しいページのタイトル"); if (!title?.trim()) return;
     const proposed = window.prompt("slug（英小文字・数字・ハイフン）", toSlug(title)); if (!proposed) return;
     const slug = toSlug(proposed);
@@ -365,8 +433,11 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       body: `# ${title.trim()}\n\nここから書き始めよう。\n`, assets: [], canonicalPath: `/${slug}`, childIds: [], depth: 0, isNew: true,
     };
     setPages((value) => [...value, page]);
+    setAccessByPage((value) => ({ ...value, [id]: parentAccess.childMode === "custom"
+      ? { canEdit: true, canCreateChildren: true, childMode: "custom", canManage: true, canManageStructure: true, inheritedFrom: null }
+      : { ...parentAccess, canEdit: true, canManage: false, canManageStructure: false } }));
     setNavigation((value) => normalizeNavigation({ ...value, tree: parentId ? appendNavigationChild(value.tree, parentId, { id }) : [...value.tree, { id }] }, [...allowedNavigationIds, id]));
-    selectPage(id); setStatus("新しいページを追加しました。まだGitHubには保存されていません。");
+    selectPage(id); setStatus("新しいページを追加しました。まだ公開側には保存されていません。");
   };
 
   const renameSlug = (page: PageDraft) => {
@@ -467,7 +538,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     const confirmation = await Swal.fire({ icon: "warning", title: "すべての変更を破棄しますか？", text: "ページ、画像、削除予定、ツリーの未保存変更をすべて元に戻します。", showCancelButton: true, confirmButtonText: "すべて破棄", cancelButtonText: "戻る", confirmButtonColor: "#b42318" });
     if (!confirmation.isConfirmed) return;
     const nextPages = baselinePages.map((page) => ({ ...page, data: { ...page.data }, assets: [] }));
-    setPages(nextPages); setNavigation(baselineNavigation); persistenceEpoch.current += 1; await writePersistedWorkspace();
+    setPages(nextPages); setNavigation(baselineNavigation); persistenceEpoch.current += 1; if (session.user) await writePersistedWorkspace(session.user.id);
     const selectedStillExists = nextPages.some((page) => page.id === selectedId);
     if (!selectedStillExists) selectPage(nextPages.find((page) => page.slug === "index")?.id ?? nextPages[0]?.id ?? "");
     setEditorRevision((value) => value + 1); setStatus("すべての変更を破棄しました");
@@ -526,34 +597,30 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
 
   const openSaveReview = () => {
     if (!session.authenticated) { location.href = "/api/auth/login"; return; }
-    if (session.installationReady === false && session.installationUrl) { location.href = session.installationUrl; return; }
-    if (!baseCommitSha) { setStatus("GitHubの最新版を読み込んでから保存してください"); return; }
+    if (!baseCommitSha) { setStatus("公開側の最新版を読み込んでから保存してください"); return; }
     if (!dirtyIds.size && !treeDirty) { setStatus("保存する変更はありません"); return; }
     setReviewOpen(true);
   };
 
   const saveAll = async () => {
     if (!session.authenticated) { location.href = "/api/auth/login"; return; }
-    if (session.installationReady === false && session.installationUrl) { location.href = session.installationUrl; return; }
-    if (!baseCommitSha) { setStatus("GitHubの最新版を読み込んでから保存してください"); return; }
+    if (!baseCommitSha) { setStatus("公開側の最新版を読み込んでから保存してください"); return; }
     if (!dirtyIds.size && !treeDirty) { setStatus("保存する変更はありません"); return; }
     const changed = pages.filter((page) => dirtyIds.has(page.id));
     if (changed.some((page) => !page.deleted && (!page.data.title.trim() || !page.data.heroLead.trim()))) { setStatus("変更ページのタイトルとリード文を入力してください"); return; }
-    setReviewOpen(false); setSaving(true); setStatus(`${changed.length}ページとツリーをGitHubへ保存しています…`);
+    setReviewOpen(false); setSaving(true); setStatus(`${changed.length}ページとツリーを保存しています…`);
     try {
-      const response = await fetch("/api/github/save", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken ?? "" }, body: JSON.stringify({
+      const response = await fetch("/api/editor/save", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken ?? "" }, body: JSON.stringify({
         baseCommitSha, navigation: stringifyYaml(safeNavigation), description: "ページエディターからの一括更新です。",
         pages: changed.map((page) => ({ id: page.id, originalSlug: page.isNew ? undefined : page.originalSlug, slug: page.slug, content: page.deleted ? undefined : serializeDocument(page), deleted: Boolean(page.deleted), assets: page.assets.map(({ name, contentBase64 }) => ({ name, contentBase64 })), title: page.data.title })),
       }) });
       const result = await response.json() as SaveResponse;
-      if (!response.ok && result.actionUrl) { setStatus(result.error ?? "GitHubで準備を続けてください"); window.setTimeout(() => { location.href = result.actionUrl!; }, 900); return; }
       if (!response.ok || !result.mode) throw new Error(result.error ?? "保存に失敗しました");
-      if (result.mode === "pull-request") { setStatus("GitHubのPull Request作成画面を開きます"); window.setTimeout(() => { location.href = result.redirectUrl!; }, 600); return; }
       const savedPages = pages.filter((page) => !page.deleted).map((page) => ({ ...page, originalSlug: page.slug, isNew: false, assets: [] }));
       persistenceEpoch.current += 1;
-      if (result.commitSha) localStorage.setItem(lastSavedCommitKey, result.commitSha);
-      setPages(savedPages); setBaselinePages(savedPages); setBaselineNavigation(safeNavigation); setBaseCommitSha(result.commitSha); await writePersistedWorkspace();
-      setStatus("GitHubへ保存しました。自動デプロイ完了後に公開サイトへ反映されます。"); setSaving(false);
+      if (result.commitSha && session.user) localStorage.setItem(lastSavedCommitKey(session.user.id), result.commitSha);
+      setPages(savedPages); setBaselinePages(savedPages); setBaselineNavigation(safeNavigation); setBaseCommitSha(result.commitSha); if (session.user) await writePersistedWorkspace(session.user.id);
+      setStatus("保存しました。自動デプロイ完了後に公開サイトへ反映されます。"); setSaving(false);
     } catch (error) { setStatus(error instanceof Error ? error.message : "保存に失敗しました"); setSaving(false); }
   };
 
@@ -564,20 +631,23 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       <a href={exitPath} className="editor-brand">← 編集をやめる</a>
       <button className="explorer-toggle" onClick={() => setExplorerOpen((value) => !value)}>☰ ページ</button>
       <a className="topbar-view-page" href={current.canonicalPath} target="_blank" rel="noreferrer">ページを見る ↗</a>
-      <div className="editor-session">{session.authenticated ? <><img src={session.user?.avatarUrl} alt="" /><span>{session.user?.login}</span></> : <a href="/api/auth/login">GitHubでログイン</a>}</div>
-      <button className="publish-button" disabled={saving} onClick={openSaveReview}>{saving ? "保存中…" : session.installationReady === false ? "GitHub Appを設定" : `保存＆公開${dirtyIds.size || treeDirty ? ` (${dirtyIds.size + (treeDirty ? 1 : 0)})` : ""}`}</button>
+      <div className="editor-session">{session.authenticated ? <><img src={session.user?.avatarUrl} alt="" /><span>{session.user?.displayName}</span></> : <a href="/api/auth/login">Discordでログイン</a>}</div>
+      <button className="publish-button" disabled={saving} onClick={openSaveReview}>{saving ? "保存中…" : `保存＆公開${dirtyIds.size || treeDirty ? ` (${dirtyIds.size + (treeDirty ? 1 : 0)})` : ""}`}</button>
       <span className="sr-status" role="status" aria-live="polite">{status}</span>
     </header>
     <div className="editor-layout">
       <aside className={`page-explorer ${explorerOpen ? "open" : ""}`}>
-        <div className="explorer-heading"><strong>ページ</strong><button onClick={() => createPage()}>＋ ルートに追加</button></div>
+        <div className="explorer-heading"><strong>ページ</strong><button disabled={!accessByPage[pages.find((page) => page.slug === "index")?.id ?? ""]?.canCreateChildren} onClick={() => createPage()}>＋ ルートに追加</button></div>
         <button className="discard-all-button" disabled={!dirtyIds.size && !treeDirty} onClick={() => void discardAll()}>変更をすべて破棄</button>
-        <button className={`index-page ${current.slug === "index" ? "selected" : ""}`} onClick={() => selectPage(pages.find((page) => page.slug === "index")!.id)}>
-          {dirtyIds.has(pages.find((page) => page.slug === "index")!.id) && <span className="dirty-dot">●</span>}⌂ トップページ
-        </button>
+        <div className={`index-row ${current.slug === "index" ? "selected" : ""}`}>
+          <button className="index-page" onClick={() => selectPage(pages.find((page) => page.slug === "index")!.id)}>
+            {dirtyIds.has(pages.find((page) => page.slug === "index")!.id) && <span className="dirty-dot">●</span>}⌂ トップページ
+          </button>
+          {accessByPage[pages.find((page) => page.slug === "index")!.id]?.canManage && <button className="index-permissions" onClick={() => setPermissionPage(pages.find((page) => page.slug === "index")!)} title="トップページの権限を設定" aria-label="トップページの権限を設定">鍵</button>}
+        </div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={treePages.map((page) => page.id)} strategy={verticalListSortingStrategy}>
-            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => deletePage(page)} onIndent={() => indentPage(page)} onOutdent={() => outdentPage(page)} />)}</div>
+            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} access={accessByPage[page.id] ?? deniedAccess} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => deletePage(page)} onIndent={() => indentPage(page)} onOutdent={() => outdentPage(page)} onPermissions={() => setPermissionPage(page)} />)}</div>
           </SortableContext>
         </DndContext>
         {deletedPages.length > 0 && <div className="deleted-pages"><strong>削除予定</strong>{deletedPages.map((page) => <button key={page.id} onClick={() => undoDelete(page)}><s>{page.data.title}</s><span>取り消す</span></button>)}</div>}
@@ -585,11 +655,12 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       </aside>
       {explorerOpen && <button className="explorer-backdrop" aria-label="ページ一覧を閉じる" onClick={() => setExplorerOpen(false)} />}
       <div className="editor-content">
+        {!currentAccess.canEdit && <div className="read-only-notice">このページは読み取り専用です。Discordのロールまたはページ権限が必要です。</div>}
         <div className="editor-meta">
-          <label>タイトル<input value={current.data.title} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, title: event.target.value } }))} /></label>
-          <label className="wide">リード文<input value={current.data.heroLead} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, heroLead: event.target.value } }))} /></label>
+          <label>タイトル<input disabled={!currentAccess.canEdit} value={current.data.title} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, title: event.target.value } }))} /></label>
+          <label className="wide">リード文<input disabled={!currentAccess.canEdit} value={current.data.heroLead} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, heroLead: event.target.value } }))} /></label>
           <div className="meta-controls">
-            <label className="checkbox"><input type="checkbox" checked={current.data.draft} disabled={current.slug === "index"} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, draft: event.target.checked } }))} />まだ非公開</label>
+            <label className="checkbox"><input type="checkbox" checked={current.data.draft} disabled={current.slug === "index" || !currentAccess.canEdit} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, draft: event.target.checked } }))} />まだ非公開</label>
             <label className="source-switch"><input type="checkbox" role="switch" checked={sourceMode} onChange={(event) => { setSourceMode(event.target.checked); switchPane("edit"); }} /><span aria-hidden="true"></span>Markdownソース</label>
           </div>
           <div className="discard-page-cell">
@@ -598,8 +669,8 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
         </div>
         <div className="editor-workspace">
           <section ref={editorPaneRef} onScroll={(event) => { if (previewPaneRef.current) syncScroll(event.currentTarget, previewPaneRef.current); }} className={`editor-pane ${activePane === "edit" ? "is-active" : ""}`} aria-label="本文エディター">
-            {sourceMode ? <textarea ref={sourceEditorRef} onScroll={(event) => { if (previewPaneRef.current) syncScroll(event.currentTarget, previewPaneRef.current); }} className="source-editor" value={current.body} onChange={(event) => updatePage(current.id, (page) => ({ ...page, body: event.target.value }))} />
-              : <MilkdownSurface key={`${current.id}-${editorRevision}`} value={current.body} onChange={(body) => updatePage(current.id, (page) => ({ ...page, body }))} onUpload={uploadImage} resolveImage={resolveEditorImage} />}
+            {sourceMode ? <textarea readOnly={!currentAccess.canEdit} ref={sourceEditorRef} onScroll={(event) => { if (previewPaneRef.current) syncScroll(event.currentTarget, previewPaneRef.current); }} className="source-editor" value={current.body} onChange={(event) => updatePage(current.id, (page) => ({ ...page, body: event.target.value }))} />
+              : <MilkdownSurface key={`${current.id}-${editorRevision}-${currentAccess.canEdit}`} readOnly={!currentAccess.canEdit} value={current.body} onChange={(body) => currentAccess.canEdit && updatePage(current.id, (page) => ({ ...page, body }))} onUpload={uploadImage} resolveImage={resolveEditorImage} />}
           </section>
           <section ref={previewPaneRef} onScroll={(event) => { if (editorPaneRef.current) syncScroll(event.currentTarget, editorPaneRef.current); }} className={`preview-pane ${activePane === "preview" ? "is-active" : ""}`} aria-label="サイトプレビュー">
             <div className="preview-hero"><h1>{current.data.title || "新しいガイド"}</h1><span>{current.data.heroLead}</span></div>
@@ -624,5 +695,6 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
         <footer><button className="review-cancel" onClick={() => setReviewOpen(false)}>編集に戻る</button><button className="review-save" onClick={() => void saveAll()}>この内容で保存</button></footer>
       </section>
     </div>}
+    {permissionPage && session.csrfToken && <PermissionsDialog page={permissionPage} csrfToken={session.csrfToken} onClose={() => setPermissionPage(undefined)} onSaved={() => { setPermissionPage(undefined); setStatus("ページ権限を保存しました。最新の権限は次回読み込み時に反映されます。"); }} />}
   </div>;
 }

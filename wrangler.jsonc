@@ -1,11 +1,14 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "kpw-web",
-  "compatibility_date": "2026-08-08",
+  "compatibility_date": "2026-08-14",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@astrojs/cloudflare/entrypoints/server",
   "workers_dev": true,
   "preview_urls": true,
+  "secrets": {
+    "required": ["DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN", "GITHUB_APP_PRIVATE_KEY"]
+  },
   "routes": [
     {
       "pattern": "docs.kamesuta.com",
@@ -23,13 +26,22 @@
       "id": "650f85c2853c433b91089cf8d1710a6b"
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "kpw-web-auth",
+      "database_id": "47776198-8221-4ae1-a533-99fcc316abc0",
+      "migrations_dir": "migrations"
+    }
+  ],
   "vars": {
-    "GITHUB_CLIENT_ID": "Iv23ligTB7zFjI7zD2uQ",
     "GITHUB_OWNER": "KamePowerWorld",
     "GITHUB_REPO": "kpw-docs",
     "GITHUB_BRANCH": "master"
   },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
   }
 }

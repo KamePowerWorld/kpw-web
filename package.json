@@ -13,9 +13,9 @@
     "prebuild": "npm run sync:docs",
     "build": "astro build",
     "preview": "wrangler dev --config dist/server/wrangler.json",
-    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
+    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json --keep-vars",
     "check": "npm run sync:docs && astro check",
-    "test": "npm run check && npm run build && node --test tests/*.test.mjs",
+    "test": "npm run check && npm run build && node --test tests/*.test.mjs && node --import tsx --test tests/*.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -40,13 +40,13 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.6",
-    "@cloudflare/workers-types": "5.20260810.1",
     "@playwright/test": "^1.62.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@types/sanitize-html": "2.16.0",
+    "tsx": "^4.23.12",
     "typescript": "5.9.3",
-    "wrangler": "4.120.0"
+    "wrangler": "^4.123.0"
   }
 }

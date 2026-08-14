@@ -1,7 +1,12 @@
 import type { APIRoute } from "astro";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { GitHubError, assertSameOrigin, getInstallationAccess, getSession, githubConfig, githubFetch, jsonResponse } from "../../../lib/github";
+import { getLiveIdentity } from "../../../lib/discord";
+import { loadRepositoryWorkspace, pageIdFromMarkdown } from "../../../lib/editor-data";
+import { GitHubError, getInstallationToken, githubConfig, githubFetch } from "../../../lib/github-app";
+import type { Navigation } from "../../../lib/navigation";
+import { createPolicyForPage, ensurePagePolicies, evaluateAccess, loadPolicies, parentMap, recordContentAudit, removePolicies, resolveNewPageModes } from "../../../lib/permissions";
+import { assertSameOrigin, jsonResponse } from "../../../lib/runtime";
 
 const slugSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const frontmatterSchema = z.object({
@@ -30,7 +35,6 @@ type BlobResponse = { sha: string; content?: string; encoding?: string };
 type TreeEntry = { path: string; mode: string; type: "blob" | "tree"; sha: string };
 type TreeResponse = { sha: string; tree?: TreeEntry[]; truncated?: boolean };
 type CreatedCommit = { sha: string; html_url: string };
-type ForkRepository = { full_name: string; parent?: { full_name: string }; permissions?: { push?: boolean } };
 type CommitTreeEntry = { path: string; mode: "100644"; type: "blob"; sha: string | null };
 
 function utf8Base64(value: string) {
@@ -148,48 +152,75 @@ async function createBatchCommit(options: {
   return commit;
 }
 
-async function prepareFork(token: string, login: string, owner: string, repo: string, branch: string) {
-  let fork: ForkRepository;
-  try { fork = await githubFetch<ForkRepository>(token, `/repos/${login}/${repo}`); }
-  catch (error) {
-    if (!(error instanceof GitHubError) || error.status !== 404) throw error;
-    return { ready: false as const, reason: "fork", actionUrl: `https://github.com/${owner}/${repo}/fork` };
-  }
-  if (fork.parent?.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) throw new GitHubError(409, `${login}/${repo} exists but is not a fork of ${owner}/${repo}.`);
-  const installation = await getInstallationAccess(token, login, repo);
-  if (!installation.ready) return { ready: false as const, reason: "installation", actionUrl: installation.actionUrl };
-  try { await githubFetch(token, `/repos/${login}/${repo}/merge-upstream`, { method: "POST", body: JSON.stringify({ branch }) }); }
-  catch (error) { if (!(error instanceof GitHubError) || ![409, 422].includes(error.status)) throw error; }
-  return { ready: true as const };
+function siblingPositions(navigation: Navigation) {
+  const result = new Map<string, number>();
+  const visit = (nodes: Navigation["tree"]) => { nodes.forEach((node, index) => { result.set(node.id, index); visit(node.children ?? []); }); };
+  visit(navigation.tree); return result;
 }
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     assertSameOrigin(request);
-    const session = await getSession(request);
-    if (!session) return jsonResponse({ error: "GitHub login is required" }, 401);
-    if (request.headers.get("x-csrf-token") !== session.csrfToken) return jsonResponse({ error: "Invalid CSRF token" }, 403);
+    const identity = await getLiveIdentity(request);
+    if (!identity) return jsonResponse({ error: "Discord login is required" }, 401);
+    if (request.headers.get("x-csrf-token") !== identity.session.csrfToken) return jsonResponse({ error: "Invalid CSRF token" }, 403);
     const input = requestSchema.parse(await request.json());
-    const navigationData = parseYaml(input.navigation);
+    const navigationData = parseYaml(input.navigation) as Navigation;
     if (navigationData?.version !== 1 || !Array.isArray(navigationData.tree)) return jsonResponse({ error: "ページツリーが不正です" }, 400);
     const { owner, repo, branch } = githubConfig();
-    const repository = await githubFetch<{ permissions?: { push?: boolean } }>(session.accessToken, `/repos/${owner}/${repo}`);
-    const title = input.pages.length === 0 ? "ページツリーを更新" : input.pages.length === 1 ? input.pages[0].title : `${input.pages.length}ページを更新`;
-    if (repository.permissions?.push) {
-      const installation = await getInstallationAccess(session.accessToken, owner, repo);
-      if (!installation.ready) return jsonResponse({ error: "GitHub AppをKamePowerWorldのkpw-docsへインストールしてください。", actionUrl: installation.actionUrl }, 403);
-      const commit = await createBatchCommit({ token: session.accessToken, owner, repo, branch, expectedCommitSha: input.baseCommitSha, message: `docs: ${title}`, navigation: input.navigation, changes: input.pages });
-      return jsonResponse({ mode: "direct", commitUrl: commit.html_url, commitSha: commit.sha, redirectUrl: "/editor" });
+    const token = await getInstallationToken();
+    const workspace = await loadRepositoryWorkspace(token);
+    if (workspace.baseCommitSha !== input.baseCommitSha) return jsonResponse({ error: "GitHub側に新しい変更があります。編集内容を保持したまま最新版を確認してください。" }, 409);
+    const existingById = new Map(workspace.pages.flatMap((page) => { const id = pageIdFromMarkdown(page.content); return id ? [[id, page] as const] : []; }));
+    const indexId = pageIdFromMarkdown(workspace.pages.find((page) => page.slug === "index")?.content ?? "");
+    if (!indexId) return jsonResponse({ error: "トップページが不正です" }, 500);
+    await ensurePagePolicies([...existingById.keys()]);
+    const policies = await loadPolicies();
+    const oldParents = parentMap(workspace.navigation, indexId); const newParents = parentMap(navigationData, indexId);
+    const oldPositions = siblingPositions(workspace.navigation); const newPositions = siblingPositions(navigationData);
+    const accessFor = (pageId: string) => evaluateAccess({ pageId, userId: identity.session.user.id, roleIds: identity.roleIds, isAdmin: identity.isAdmin, policies, parents: oldParents });
+    const newPageIds = new Set(input.pages.filter((change) => !existingById.has(change.id) && !change.deleted).map((change) => change.id));
+    const newPageModes = resolveNewPageModes({
+      newPageIds, existingPageIds: new Set(existingById.keys()), userId: identity.session.user.id,
+      roleIds: identity.roleIds, isAdmin: identity.isAdmin, policies, oldParents, newParents,
+    });
+
+    for (const change of input.pages) {
+      const existing = existingById.get(change.id);
+      if (!existing) {
+        if (change.deleted) continue;
+        if (!newPageModes.has(change.id)) return jsonResponse({ error: `「${change.title}」をこの場所に作成する権限がありません` }, 403);
+        continue;
+      }
+      const access = accessFor(change.id);
+      const structural = change.deleted || change.slug !== existing.slug;
+      if (structural ? !access.canManageStructure : !access.canEdit) return jsonResponse({ error: `「${change.title}」を変更する権限がありません` }, 403);
+      if (!structural && !access.canManageStructure) {
+        const before = pageDataFromMarkdown(existing.content); const after = pageDataFromMarkdown(change.content ?? "");
+        if (!before || !after || JSON.stringify(before.aliases) !== JSON.stringify(after.aliases)) return jsonResponse({ error: "リダイレクト設定の変更にはページ管理権限が必要です" }, 403);
+      }
+      if (change.deleted && [...oldParents.values()].includes(change.id)) return jsonResponse({ error: "子ページがあるページは削除できません" }, 400);
     }
-    const fork = await prepareFork(session.accessToken, session.user.login, owner, repo, branch);
-    if (!fork.ready) return jsonResponse({ error: fork.reason === "fork" ? "最初にGitHubでkpw-docsをforkしてください。" : "forkへ書き込むため、GitHub Appを個人アカウントへインストールしてください。", actionUrl: fork.actionUrl }, 409);
-    const forkRef = await githubFetch<RefResponse>(session.accessToken, `/repos/${session.user.login}/${repo}/git/ref/heads/${branch}`);
-    const editBranch = `editor/${session.user.login}/${Date.now()}`;
-    await githubFetch(session.accessToken, `/repos/${session.user.login}/${repo}/git/refs`, { method: "POST", body: JSON.stringify({ ref: `refs/heads/${editBranch}`, sha: forkRef.object.sha }) });
-    await createBatchCommit({ token: session.accessToken, owner: session.user.login, repo, branch: editBranch, message: `docs: ${title}`, navigation: input.navigation, changes: input.pages });
-    const compare = new URL(`https://github.com/${owner}/${repo}/compare/${branch}...${session.user.login}:${editBranch}`);
-    compare.searchParams.set("quick_pull", "1"); compare.searchParams.set("title", title); compare.searchParams.set("body", input.description || "ページエディターからの一括更新提案です。");
-    return jsonResponse({ mode: "pull-request", redirectUrl: compare.toString() });
+    for (const pageId of existingById.keys()) {
+      if (pageId === indexId || input.pages.some((change) => change.id === pageId && change.deleted)) continue;
+      const oldParent = oldParents.get(pageId); const newParent = newParents.get(pageId);
+      const moved = oldParent !== newParent || oldPositions.get(pageId) !== newPositions.get(pageId);
+      if (!moved) continue;
+      if (!accessFor(pageId).canManageStructure) return jsonResponse({ error: "ページを並べ替える権限がありません" }, 403);
+      if (oldParent !== newParent && (!newParent || !accessFor(newParent).canCreateChildren)) return jsonResponse({ error: "移動先に子ページを作る権限がありません" }, 403);
+    }
+    const title = input.pages.length === 0 ? "ページツリーを更新" : input.pages.length === 1 ? input.pages[0].title : `${input.pages.length}ページを更新`;
+    const commit = await createBatchCommit({ token, owner, repo, branch, expectedCommitSha: input.baseCommitSha, message: `docs: ${title}`, navigation: input.navigation, changes: input.pages });
+    try {
+      for (const [pageId, mode] of newPageModes) await createPolicyForPage(pageId, identity.session.user.id, mode);
+      const deletedIds = input.pages.filter((change) => change.deleted).map((change) => change.id);
+      await removePolicies(deletedIds, identity.session.user.id, commit.sha);
+      await recordContentAudit(identity.session.user.id, input.pages.filter((change) => !change.deleted).map((change) => change.id), commit.sha);
+    } catch (error) {
+      console.error(JSON.stringify({ message: "content saved but permission audit failed", commitSha: commit.sha, error: error instanceof Error ? error.message : String(error) }));
+      return jsonResponse({ mode: "direct", commitUrl: commit.html_url, commitSha: commit.sha, partial: true, error: "本文は保存されましたが、権限情報の更新に失敗しました。adminへ連絡してください。" }, 500);
+    }
+    return jsonResponse({ mode: "direct", commitUrl: commit.html_url, commitSha: commit.sha, redirectUrl: "/editor" });
   } catch (error) {
     if (error instanceof Response) return error;
     if (error instanceof z.ZodError) return jsonResponse({ error: "入力内容を確認してください", issues: error.issues }, 400);

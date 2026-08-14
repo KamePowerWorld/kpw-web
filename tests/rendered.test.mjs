@@ -52,7 +52,7 @@ test("editor and Worker entrypoints are built", () => {
 test("tree, batch save, slug reuse, and deletion policies are present", () => {
   const editor = readFileSync("src/components/EditorApp.tsx", "utf8"); const save = readFileSync("src/pages/api/github/save.ts", "utf8");
   assert.match(editor, /保存＆公開/); assert.match(editor, /子ページがあるため削除できません/); assert.match(editor, /releaseAlias/); assert.match(editor, /indexedDB/);
-  assert.match(save, /sha: null/); assert.match(save, /navigation\.yml/); assert.match(save, /expectedCommitSha/);
+  assert.match(save, /sha: null/); assert.match(save, /navigation\.yml/); assert.match(save, /expectedCommitSha/); assert.match(save, /getLiveIdentity/); assert.match(save, /canManageStructure/);
 });
 
 test("corrupted browser trees are repaired without multiplying pages", () => {
@@ -68,6 +68,6 @@ test("corrupted browser trees are repaired without multiplying pages", () => {
 });
 
 test("organization spelling and repository split stay canonical", () => {
-  const github = readFileSync("src/lib/github.ts", "utf8"); const workflow = readFileSync(".github/workflows/publish.yml", "utf8");
+  const github = readFileSync("src/lib/github-app.ts", "utf8"); const workflow = readFileSync(".github/workflows/publish.yml", "utf8");
   assert.match(github, /KamePowerWorld/); assert.match(workflow, /KamePowerWorld\/kpw-docs/); assert.doesNotMatch(`${github}\n${workflow}`, /KanePowerWorld/);
 });

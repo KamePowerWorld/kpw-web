@@ -371,9 +371,12 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .explorer-heading button { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font: 700 10px/1 inherit; cursor: pointer; }
 .discard-all-button { width: calc(100% - 12px); margin: 0 6px 10px; padding: 7px; border: 1px solid #b42318; border-radius: 7px; color: #9b1c12; background: #fff5f3; font: 700 10px/1.2 inherit; cursor: pointer; }
 .discard-all-button:disabled, .discard-page-button:disabled { opacity: .42; cursor: default; }
-.index-page, .explorer-row { width: 100%; min-height: 38px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; }
-.index-page { padding: 8px 10px; text-align: left; font: 800 12px/1.35 inherit; cursor: pointer; }
-.index-page.selected, .explorer-row.selected { background: #dff5d8; }
+.index-row, .explorer-row { width: 100%; min-height: 38px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; }
+.index-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.index-page { min-height: 38px; padding: 8px 10px; border: 0; color: inherit; background: transparent; text-align: left; font: 800 12px/1.35 inherit; cursor: pointer; }
+.index-row.selected, .explorer-row.selected { background: #dff5d8; }
+.index-permissions { width: 32px; height: 32px; margin-right: 4px; border: 0; border-radius: 7px; color: inherit; background: transparent; cursor: pointer; }
+.index-permissions:hover, .index-permissions:focus-visible { background: #fff; }
 .explorer-tree { display: grid; gap: 2px; }
 .explorer-row {
   padding-left: calc(var(--tree-depth, 0) * 15px); display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center;
@@ -434,6 +437,33 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .editor-actions [role="status"] { margin-left: auto; color: #426047; font-size: 12px; }
 .view-page-hint { color: #66806a; font-size: 11px; }
 .editor-workspace { min-height: calc(100vh - 165px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.read-only-notice { padding: 9px 20px; color: #6b4d00; background: #fff5c2; border-bottom: 1px solid #d8c164; font-weight: 700; }
+.milkdown-host.read-only { background: #f8faf8; }
+.milkdown-host.read-only .milkdown { cursor: default; }
+.row-actions button:disabled, .drag-handle:disabled { opacity: .3; cursor: not-allowed; }
+
+.permission-backdrop { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgb(0 24 8 / .58); }
+.permission-dialog { width: min(720px, 100%); max-height: min(820px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden; color: #123d21; background: #fff; border: 3px solid #0b5427; border-radius: 22px; box-shadow: 0 22px 80px rgb(0 0 0 / .35); }
+.permission-dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; color: #fff; background: #0b5427; }
+.permission-dialog > header span { font-size: 12px; font-weight: 800; }
+.permission-dialog > header h2 { margin: 3px 0 0; font-size: 25px; }
+.permission-dialog > header button { width: 42px; height: 42px; color: #fff; font-size: 25px; background: transparent; border: 1px solid #fff; border-radius: 50%; }
+.permission-body, .permission-loading { padding: 20px 24px; overflow: auto; }
+.permission-body > label { display: grid; gap: 7px; font-weight: 800; }
+.permission-body select, .permission-body input { min-height: 43px; padding: 8px 11px; border: 1px solid #9cb7a2; border-radius: 9px; background: #fff; }
+.permission-owner { padding: 10px 12px; background: #eef8eb; border-radius: 9px; }
+.permission-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; }
+.permission-add button, .permission-dialog footer button { padding: 9px 15px; font-weight: 800; border: 2px solid #174f2d; border-radius: 10px; background: #fff; }
+.member-results { display: grid; gap: 5px; max-height: 170px; margin-top: 7px; overflow: auto; }
+.member-results button { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 8px; padding: 7px; text-align: left; border: 1px solid #bdd0c1; border-radius: 9px; background: #fff; }
+.member-results img { width: 32px; height: 32px; border-radius: 50%; }
+.permission-grants { display: grid; gap: 10px; margin-top: 16px; }
+.permission-grant { display: grid; grid-template-columns: minmax(130px, 1fr) auto minmax(160px, auto) auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid #b9cfbd; border-radius: 12px; background: #f7fbf5; }
+.permission-grant label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.permission-grant label select { min-height: 36px; }
+.permission-grant .remove-grant { color: #a02b23; background: #fff; border: 1px solid #dfaaa5; border-radius: 8px; }
+.permission-dialog > footer { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 24px; border-top: 1px solid #c8d8cb; }
+.permission-dialog > footer .save-permissions { color: #fff; background: #9550dc; }
 .editor-pane, .preview-pane { min-width: 0; height: calc(100vh - 165px); overflow: auto; }
 .editor-pane { background: #fff; border-right: 3px solid var(--line); }
 .milkdown-host { min-height: 100%; }
@@ -520,6 +550,12 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
   .editor-actions { padding: 9px 12px; flex-wrap: wrap; }
   .editor-actions [role="status"] { width: 100%; margin-left: 0; line-height: 1.5; }
   .editor-workspace { display: block; }
+  .read-only-notice { padding: 9px 12px; font-size: 13px; }
+  .permission-backdrop { padding: 8px; }
+  .permission-dialog { max-height: calc(100dvh - 16px); border-radius: 16px; }
+  .permission-dialog > header, .permission-body, .permission-loading { padding: 15px; }
+  .permission-grant { grid-template-columns: 1fr auto; }
+  .permission-grant > strong { grid-column: 1 / -1; }
   .editor-pane, .preview-pane { display: none; height: calc(100svh - 76px); min-height: 0; overflow: auto; scroll-padding-bottom: 82px; }
   .editor-pane.is-active, .preview-pane.is-active { display: block; }
   .editor-pane { border: 0; }
