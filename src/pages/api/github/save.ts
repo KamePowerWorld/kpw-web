@@ -2,8 +2,9 @@ import type { APIRoute } from "astro";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { getLiveIdentity } from "../../../lib/discord";
+import { discordGitAuthor, githubAppCommitter } from "../../../lib/git-author";
 import { loadRepositoryWorkspace, pageIdFromMarkdown } from "../../../lib/editor-data";
-import { GitHubError, getInstallationToken, githubConfig, githubFetch } from "../../../lib/github-app";
+import { GitHubError, getAppBot, getInstallationToken, githubConfig, githubFetch } from "../../../lib/github-app";
 import type { Navigation } from "../../../lib/navigation";
 import { createPolicyForPage, ensurePagePolicies, evaluateAccess, loadPolicies, parentMap, recordContentAudit, removePolicies, resolveNewPageModes } from "../../../lib/permissions";
 import { assertSameOrigin, jsonResponse } from "../../../lib/runtime";
@@ -54,8 +55,10 @@ function pageDataFromMarkdown(source: string) {
 async function createBatchCommit(options: {
   token: string; owner: string; repo: string; branch: string; expectedCommitSha?: string;
   message: string; navigation: string; changes: z.infer<typeof pageChangeSchema>[];
+  author: { name: string; email: string };
+  committer: { name: string; email: string };
 }) {
-  const { token, owner, repo, branch, expectedCommitSha, message, navigation, changes } = options;
+  const { token, owner, repo, branch, expectedCommitSha, message, navigation, changes, author, committer } = options;
   const ref = await githubFetch<RefResponse>(token, `/repos/${owner}/${repo}/git/ref/heads/${branch}`);
   if (expectedCommitSha && ref.object.sha !== expectedCommitSha) throw new GitHubError(409, "GitHub側に新しい変更があります。編集内容を保持したまま最新版を確認してください。");
   const base = await githubFetch<CommitResponse>(token, `/repos/${owner}/${repo}/git/commits/${ref.object.sha}`);
@@ -144,7 +147,7 @@ async function createBatchCommit(options: {
     method: "POST", body: JSON.stringify({ base_tree: base.tree.sha, tree: deduplicatedEntries }),
   });
   const commit = await githubFetch<CreatedCommit>(token, `/repos/${owner}/${repo}/git/commits`, {
-    method: "POST", body: JSON.stringify({ message, tree: tree.sha, parents: [ref.object.sha] }),
+    method: "POST", body: JSON.stringify({ message, tree: tree.sha, parents: [ref.object.sha], author, committer }),
   });
   await githubFetch(token, `/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
     method: "PATCH", body: JSON.stringify({ sha: commit.sha, force: false }),
@@ -169,6 +172,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (navigationData?.version !== 1 || !Array.isArray(navigationData.tree)) return jsonResponse({ error: "ページツリーが不正です" }, 400);
     const { owner, repo, branch } = githubConfig();
     const token = await getInstallationToken();
+    const committer = githubAppCommitter(await getAppBot(token));
     const workspace = await loadRepositoryWorkspace(token);
     if (workspace.baseCommitSha !== input.baseCommitSha) return jsonResponse({ error: "GitHub側に新しい変更があります。編集内容を保持したまま最新版を確認してください。" }, 409);
     const existingById = new Map(workspace.pages.flatMap((page) => { const id = pageIdFromMarkdown(page.content); return id ? [[id, page] as const] : []; }));
@@ -210,7 +214,10 @@ export const POST: APIRoute = async ({ request }) => {
       if (oldParent !== newParent && (!newParent || !accessFor(newParent).canCreateChildren)) return jsonResponse({ error: "移動先に子ページを作る権限がありません" }, 403);
     }
     const title = input.pages.length === 0 ? "ページツリーを更新" : input.pages.length === 1 ? input.pages[0].title : `${input.pages.length}ページを更新`;
-    const commit = await createBatchCommit({ token, owner, repo, branch, expectedCommitSha: input.baseCommitSha, message: `docs: ${title}`, navigation: input.navigation, changes: input.pages });
+    const commit = await createBatchCommit({
+      token, owner, repo, branch, expectedCommitSha: input.baseCommitSha, message: `docs: ${title}`,
+      navigation: input.navigation, changes: input.pages, author: discordGitAuthor(identity.session.user), committer,
+    });
     try {
       for (const [pageId, mode] of newPageModes) await createPolicyForPage(pageId, identity.session.user.id, mode);
       const deletedIds = input.pages.filter((change) => change.deleted).map((change) => change.id);

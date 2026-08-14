@@ -5,6 +5,7 @@ export const githubConfig = () => ({
   owner: runtimeEnv.GITHUB_OWNER || "KamePowerWorld",
   repo: runtimeEnv.GITHUB_REPO || "kpw-docs",
   branch: runtimeEnv.GITHUB_BRANCH || "master",
+  appSlug: runtimeEnv.GITHUB_APP_SLUG || "kamepowerworldeditor",
 });
 
 export class GitHubError extends Error {
@@ -66,4 +67,9 @@ export async function getInstallationToken() {
 
 export async function githubFetch<T>(token: string, path: string, init: RequestInit = {}) {
   return rawGitHubFetch<T>(token, path, init);
+}
+
+export async function getAppBot(token: string) {
+  const login = `${githubConfig().appSlug}[bot]`;
+  return githubFetch<{ id: number; login: string }>(token, `/users/${encodeURIComponent(login)}`);
 }

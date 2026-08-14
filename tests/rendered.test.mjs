@@ -53,6 +53,8 @@ test("tree, batch save, slug reuse, and deletion policies are present", () => {
   const editor = readFileSync("src/components/EditorApp.tsx", "utf8"); const save = readFileSync("src/pages/api/github/save.ts", "utf8");
   assert.match(editor, /保存＆公開/); assert.match(editor, /子ページがあるため削除できません/); assert.match(editor, /releaseAlias/); assert.match(editor, /indexedDB/);
   assert.match(save, /sha: null/); assert.match(save, /navigation\.yml/); assert.match(save, /expectedCommitSha/); assert.match(save, /getLiveIdentity/); assert.match(save, /canManageStructure/);
+  assert.match(save, /author: discordGitAuthor\(identity\.session\.user\)/);
+  assert.match(save, /committer/); assert.match(save, /getAppBot/);
 });
 
 test("corrupted browser trees are repaired without multiplying pages", () => {

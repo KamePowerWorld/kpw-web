@@ -72,6 +72,25 @@ test("a page manager can assign a Discord role in the permission dialog", async 
   expect(savedPermissionBody).toMatchObject({ accessMode: "custom", grants: [{ subjectType: "role", subjectId: "200000000000000001", canEdit: true }] });
 });
 
+test("existing individual grants show a Discord avatar and nickname instead of a numeric ID", async ({ page, isMobile }) => {
+  const memberId = "300000000000000001";
+  await page.route(`**/api/editor/pages/${pageId}/permissions`, (route) => route.fulfill({ json: {
+    policy: { pageId, accessMode: "custom", creatorUserId: null, managerUserId: null, revision: 1, grants: [
+      { subjectType: "user", subjectId: memberId, canEdit: true, createChildrenMode: null },
+    ] },
+    users: [{ id: memberId, name: "かめっち", username: "kamesuta", avatarUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" }],
+  } }));
+  await page.goto(`/editor?page=${pageId}`);
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const row = page.locator(".explorer-row", { hasText: "テスト" }); await row.hover();
+  await row.getByRole("button", { name: "権限を設定" }).click();
+  const subject = page.locator(".permission-subject", { hasText: "かめっち" });
+  await expect(subject).toBeVisible();
+  await expect(subject.locator("img")).toBeVisible();
+  await expect(subject).toContainText("@kamesuta");
+  await expect(page.getByRole("dialog", { name: "テスト" })).not.toContainText(memberId);
+});
+
 test("an admin can open permissions for the top page", async ({ page, isMobile }) => {
   await page.goto("/editor");
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();

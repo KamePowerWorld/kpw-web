@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { z } from "zod";
-import { getLiveIdentity } from "../../../../../lib/discord";
+import { avatarUrl, getGuildMember, getLiveIdentity } from "../../../../../lib/discord";
 import { loadRepositoryWorkspace, pageIdFromMarkdown } from "../../../../../lib/editor-data";
 import { getInstallationToken } from "../../../../../lib/github-app";
 import { ensurePagePolicies, evaluateAccess, loadPolicies, parentMap, PermissionConflictError, savePolicy } from "../../../../../lib/permissions";
@@ -35,7 +35,18 @@ export const GET: APIRoute = async ({ request, params }) => {
     const pageId = params.id!;
     const { policy } = await context(request, pageId);
     if (!policy) return jsonResponse({ error: "権限設定が見つかりません" }, 404);
-    return jsonResponse({ policy });
+    const userIds = new Set([
+      ...policy.grants.filter((grant) => grant.subjectType === "user").map((grant) => grant.subjectId),
+      ...(policy.creatorUserId ? [policy.creatorUserId] : []),
+      ...(policy.managerUserId ? [policy.managerUserId] : []),
+    ]);
+    const users = (await Promise.all([...userIds].map(async (userId) => {
+      try {
+        const member = await getGuildMember(userId); const user = member.user;
+        return user ? { id: user.id, name: member.nick || user.global_name || user.username, username: user.username, avatarUrl: avatarUrl(user) } : undefined;
+      } catch { return undefined; }
+    }))).filter((user) => user !== undefined);
+    return jsonResponse({ policy, users });
   } catch (error) { return error instanceof Response ? error : jsonResponse({ error: "権限設定を取得できませんでした" }, 500); }
 };
 

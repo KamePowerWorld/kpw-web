@@ -451,7 +451,8 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .permission-body, .permission-loading { padding: 20px 24px; overflow: auto; }
 .permission-body > label { display: grid; gap: 7px; font-weight: 800; }
 .permission-body select, .permission-body input { min-height: 43px; padding: 8px 11px; border: 1px solid #9cb7a2; border-radius: 9px; background: #fff; }
-.permission-owner { padding: 10px 12px; background: #eef8eb; border-radius: 9px; }
+.permission-owner { padding: 10px 12px; display: flex; align-items: center; gap: 12px; background: #eef8eb; border-radius: 9px; }
+.permission-owner > span:first-child { font-size: 12px; font-weight: 800; }
 .permission-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; }
 .permission-add button, .permission-dialog footer button { padding: 9px 15px; font-weight: 800; border: 2px solid #174f2d; border-radius: 10px; background: #fff; }
 .member-results { display: grid; gap: 5px; max-height: 170px; margin-top: 7px; overflow: auto; }
@@ -459,6 +460,12 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .member-results img { width: 32px; height: 32px; border-radius: 50%; }
 .permission-grants { display: grid; gap: 10px; margin-top: 16px; }
 .permission-grant { display: grid; grid-template-columns: minmax(130px, 1fr) auto minmax(160px, auto) auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid #b9cfbd; border-radius: 12px; background: #f7fbf5; }
+.permission-subject { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.permission-subject img, .permission-avatar-fallback { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; }
+.permission-avatar-fallback { display: grid; place-items: center; color: #fff; background: #819184; }
+.permission-subject > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.permission-subject small { display: block; margin-top: 2px; color: #687b6b; font-size: 10px; font-weight: 600; }
+.role-dot { width: 13px; height: 13px; flex: 0 0 13px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #6d8171; }
 .permission-grant label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .permission-grant label select { min-height: 36px; }
 .permission-grant .remove-grant { color: #a02b23; background: #fff; border: 1px solid #dfaaa5; border-radius: 8px; }

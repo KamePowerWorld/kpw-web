@@ -37,6 +37,7 @@ type WorkspaceResponse = { pages: Array<{ slug: string; filePath: string; conten
 type SaveResponse = { mode?: "direct"; redirectUrl?: string; commitSha?: string; partial?: boolean; error?: string };
 type PageGrant = { subjectType: "role" | "user"; subjectId: string; canEdit: boolean; createChildrenMode: "inherit" | "custom" | null };
 type PagePolicy = { pageId: string; accessMode: "inherit" | "custom"; creatorUserId: string | null; managerUserId: string | null; revision: number; grants: PageGrant[] };
+type DiscordMemberSummary = { id: string; name: string; username: string; avatarUrl: string };
 type PersistedWorkspace = {
   pages: PageDraft[]; navigation: Navigation; dirtyIds: string[]; treeDirty: boolean; baseCommitSha?: string; selectedId: string;
   baselinePages?: PageDraft[]; baselineNavigation?: Navigation;
@@ -238,27 +239,46 @@ function SortablePage({ page, access, selected, dirty, onSelect, onAdd, onRename
   </div>;
 }
 
+function roleColor(color?: number) {
+  return color ? `#${color.toString(16).padStart(6, "0")}` : "#819184";
+}
+
+function MemberIdentity({ member }: { member?: DiscordMemberSummary }) {
+  return <strong className="permission-subject">
+    {member ? <img src={member.avatarUrl} alt="" /> : <span className="permission-avatar-fallback" aria-hidden="true">?</span>}
+    <span>{member?.name ?? "サーバーにいないメンバー"}{member && <small>@{member.username}</small>}</span>
+  </strong>;
+}
+
 function PermissionsDialog({ page, csrfToken, onClose, onSaved }: { page: PageDraft; csrfToken: string; onClose: () => void; onSaved: () => void }) {
   const [policy, setPolicy] = useState<PagePolicy>();
-  const [roles, setRoles] = useState<Array<{ id: string; name: string }>>([]);
+  const [roles, setRoles] = useState<Array<{ id: string; name: string; color: number }>>([]);
   const [roleId, setRoleId] = useState("");
   const [query, setQuery] = useState("");
-  const [members, setMembers] = useState<Array<{ id: string; name: string; username: string; avatarUrl: string }>>([]);
+  const [members, setMembers] = useState<DiscordMemberSummary[]>([]);
+  const [knownMembers, setKnownMembers] = useState<Record<string, DiscordMemberSummary>>({});
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     void Promise.all([
-      fetch(`/api/editor/pages/${page.id}/permissions`).then((response) => response.json() as Promise<{ policy?: PagePolicy }>),
-      fetch(`/api/discord/roles?pageId=${page.id}`).then((response) => response.json() as Promise<{ roles?: Array<{ id: string; name: string }> }>),
-    ]).then(([permissionResult, roleResult]) => { setPolicy(permissionResult.policy); setRoles(roleResult.roles ?? []); });
+      fetch(`/api/editor/pages/${page.id}/permissions`).then((response) => response.json() as Promise<{ policy?: PagePolicy; users?: DiscordMemberSummary[] }>),
+      fetch(`/api/discord/roles?pageId=${page.id}`).then((response) => response.json() as Promise<{ roles?: Array<{ id: string; name: string; color: number }> }>),
+    ]).then(([permissionResult, roleResult]) => {
+      setPolicy(permissionResult.policy); setRoles(roleResult.roles ?? []);
+      setKnownMembers(Object.fromEntries((permissionResult.users ?? []).map((member) => [member.id, member])));
+    });
   }, [page.id]);
   const addGrant = (subjectType: "role" | "user", subjectId: string) => {
     if (!policy || policy.grants.some((grant) => grant.subjectType === subjectType && grant.subjectId === subjectId)) return;
+    if (subjectType === "user") {
+      const member = members.find((candidate) => candidate.id === subjectId);
+      if (member) setKnownMembers((current) => ({ ...current, [member.id]: member }));
+    }
     setPolicy({ ...policy, accessMode: "custom", grants: [...policy.grants, { subjectType, subjectId, canEdit: true, createChildrenMode: null }] });
   };
   const updateGrant = (index: number, update: Partial<PageGrant>) => policy && setPolicy({ ...policy, grants: policy.grants.map((grant, position) => position === index ? { ...grant, ...update } : grant) });
   const search = async () => {
     if (query.trim().length < 2) return;
-    const result = await fetch(`/api/discord/members?pageId=${page.id}&query=${encodeURIComponent(query.trim())}`).then((response) => response.json() as Promise<{ members?: Array<{ id: string; name: string; username: string; avatarUrl: string }> }>);
+    const result = await fetch(`/api/discord/members?pageId=${page.id}&query=${encodeURIComponent(query.trim())}`).then((response) => response.json() as Promise<{ members?: DiscordMemberSummary[] }>);
     setMembers(result.members ?? []);
   };
   const save = async () => {
@@ -273,14 +293,14 @@ function PermissionsDialog({ page, csrfToken, onClose, onSaved }: { page: PageDr
     <section className="permission-dialog" role="dialog" aria-modal="true" aria-labelledby="permission-title">
       <header><div><span>ページ権限</span><h2 id="permission-title">{page.data.title}</h2></div><button aria-label="閉じる" onClick={onClose}>×</button></header>
       {!policy ? <p className="permission-loading">読み込み中…</p> : <div className="permission-body">
-        {policy.managerUserId && <p className="permission-owner">作成者管理：Discord User {policy.managerUserId}</p>}
+        {policy.managerUserId && <div className="permission-owner"><span>作成者管理</span><MemberIdentity member={knownMembers[policy.managerUserId]} /></div>}
         <label>権限の基準<select value={policy.accessMode} onChange={(event) => setPolicy({ ...policy, accessMode: event.target.value as "inherit" | "custom" })}><option value="inherit">親ページからライブ継承</option><option value="custom">このページで個別設定</option></select></label>
         {policy.accessMode === "custom" && <>
           <div className="permission-add"><select value={roleId} onChange={(event) => setRoleId(event.target.value)}><option value="">ロールを選択</option>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select><button disabled={!roleId} onClick={() => { addGrant("role", roleId); setRoleId(""); }}>ロールを追加</button></div>
           <div className="permission-add"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="メンバー名を2文字以上入力" /><button onClick={() => void search()}>検索</button></div>
           {members.length > 0 && <div className="member-results">{members.map((member) => <button key={member.id} onClick={() => addGrant("user", member.id)}><img src={member.avatarUrl} alt="" />{member.name}<small>@{member.username}</small></button>)}</div>}
           <div className="permission-grants">{policy.grants.map((grant, index) => <div className="permission-grant" key={`${grant.subjectType}:${grant.subjectId}`}>
-            <strong>{grant.subjectType === "role" ? `@${roles.find((role) => role.id === grant.subjectId)?.name ?? grant.subjectId}` : `個人 ${grant.subjectId}`}</strong>
+            {grant.subjectType === "role" ? <strong className="permission-subject"><i className="role-dot" style={{ backgroundColor: roleColor(roles.find((role) => role.id === grant.subjectId)?.color) }} />@{roles.find((role) => role.id === grant.subjectId)?.name ?? "削除されたロール"}</strong> : <MemberIdentity member={knownMembers[grant.subjectId]} />}
             <label><input type="checkbox" checked={grant.canEdit} onChange={(event) => updateGrant(index, { canEdit: event.target.checked })} />このページを編集</label>
             <label>子ページ作成<select value={grant.createChildrenMode ?? "none"} onChange={(event) => updateGrant(index, { createChildrenMode: event.target.value === "none" ? null : event.target.value as "inherit" | "custom" })}><option value="none">許可しない</option><option value="inherit">権限を継承</option><option value="custom">作成者がカスタム可能</option></select></label>
             <button className="remove-grant" onClick={() => setPolicy({ ...policy, grants: policy.grants.filter((_, position) => position !== index) })}>削除</button>

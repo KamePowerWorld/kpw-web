@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-type ConfiguredNames = "DISCORD_CLIENT_ID" | "DISCORD_GUILD_ID" | "DISCORD_ADMIN_ROLE_ID" | "GITHUB_APP_ID" | "GITHUB_INSTALLATION_ID";
+type ConfiguredNames = "DISCORD_CLIENT_ID" | "DISCORD_GUILD_ID" | "DISCORD_ADMIN_ROLE_ID" | "GITHUB_APP_ID" | "GITHUB_APP_SLUG" | "GITHUB_INSTALLATION_ID";
 export type RuntimeEnv = Omit<Cloudflare.Env, ConfiguredNames> & Record<ConfiguredNames, string>;
 
 export const runtimeEnv = env as RuntimeEnv;

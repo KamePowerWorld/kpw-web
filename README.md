@@ -39,6 +39,7 @@ npm run dev
 - `custom`: 作成者がそのページ以下を管理し、権限を自由に設定できる。adminは常に管理可能。
 
 未設定の既存ページはadminのみ編集できます。ロールはAPI呼び出しごとにDiscordから再確認するため、Discord側でロールを外すと権限も失われます。
+個人権限は内部では変更されにくいDiscord IDで保持し、画面では現在のアバター、サーバーニックネーム、Discordユーザー名を表示します。
 
 ## GitHub App（原稿保存用）
 
@@ -70,6 +71,7 @@ Cloudflare Dashboardで環境変数を管理するため、デプロイには`--
 
 - DiscordセッションはHttpOnly・Secure・SameSite Cookieで管理し、保存と権限変更はOrigin、CSRF token、現在のDiscord所属・ロールを検証します。
 - GitHub AppのInstallation tokenはサーバー内で短時間だけ使用し、ブラウザへ渡しません。
+- 原稿commitのAuthor名は編集者のDiscordユーザー名、CommitterはGitHub Appになります。
 - Markdownと画像はデータとして扱い、HTML、SVG、危険なパス、過大ファイルを拒否します。
 - GitHub保存は開始時commit SHAを照合し、競合時に`master`を上書きしません。
 - 権限変更はD1のrevisionで競合を検出し、操作履歴を`audit_events`へ記録します。
