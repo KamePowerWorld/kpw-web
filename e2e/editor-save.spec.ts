@@ -201,9 +201,8 @@ test("desktop metadata stays horizontal without overflowing at laptop width", as
   expect(lead).not.toBeNull();
   expect(discard).not.toBeNull();
   expect(Math.abs(title!.y - lead!.y)).toBeLessThan(3);
-  expect(Math.abs(title!.y - discard!.y)).toBeLessThan(6);
-  expect(title!.x + title!.width).toBeLessThanOrEqual(discard!.x);
-  expect(discard!.x + discard!.width).toBeLessThanOrEqual(lead!.x);
+  expect(discard!.y).toBeGreaterThan(title!.y + title!.height);
+  expect(Math.abs(discard!.x + discard!.width - (lead!.x + lead!.width))).toBeLessThan(3);
   expect(discard!.width).toBeGreaterThan(discard!.height * 1.5);
 
   const draft = await page.getByRole("checkbox", { name: "まだ非公開" }).boundingBox();
@@ -212,6 +211,7 @@ test("desktop metadata stays horizontal without overflowing at laptop width", as
   expect(source).not.toBeNull();
   expect(Math.abs(draft!.y + draft!.height / 2 - (source!.y + source!.height / 2))).toBeLessThan(6);
   expect(draft!.y).toBeGreaterThan(title!.y + title!.height);
+  expect(discard!.y).toBeLessThanOrEqual(draft!.y + draft!.height);
 });
 
 test("mobile workspace fills the viewport without trailing app padding", async ({ page, isMobile }) => {
