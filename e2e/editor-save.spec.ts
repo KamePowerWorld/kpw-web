@@ -68,6 +68,35 @@ test("save review uses folded hunks and one review scrollbar", async ({ page }) 
   await expect(review.locator(".diff-line-number")).not.toHaveCount(0);
 });
 
+test("multiple file hunks keep their full height and share one scrollbar", async ({ page, isMobile }) => {
+  remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n# テスト\n`;
+  await page.goto(`/editor?page=${pageId}`);
+  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+  await page.getByRole("textbox", { name: "タイトル" }).fill("変更したテスト");
+
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  await page.locator(".page-name", { hasText: "ポイ活" }).click();
+  await page.getByRole("textbox", { name: "タイトル" }).fill("変更したポイ活");
+
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  await page.locator(".index-page").click();
+  await page.getByRole("textbox", { name: "タイトル" }).fill("変更したトップ");
+
+  await page.getByRole("button", { name: /変更をまとめて保存/ }).click();
+  const review = page.getByRole("dialog", { name: "変更内容を確認" });
+  const body = review.locator(".save-review-body");
+  const cards = body.locator(".diff-card");
+  await expect(cards).toHaveCount(3);
+  await expect(body).toHaveCSS("overflow-y", "auto");
+  const bodyGeometry = await body.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+  expect(bodyGeometry.scrollHeight).toBeGreaterThan(bodyGeometry.clientHeight);
+  for (const card of await cards.all()) {
+    const geometry = await card.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+    expect(geometry.clientHeight).toBeGreaterThanOrEqual(geometry.scrollHeight);
+    await expect(card.locator(".diff-lines")).toHaveCSS("overflow-y", "visible");
+  }
+});
+
 test("reverted edits and a cancelled new page are no longer changes", async ({ page, isMobile }) => {
   await page.goto(`/editor?page=${pageId}`);
   const title = page.getByRole("textbox", { name: "タイトル" });
