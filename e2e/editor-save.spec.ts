@@ -55,6 +55,7 @@ test("publishing a private page survives an immediate reload", async ({ page }) 
 test("save review uses folded hunks and one review scrollbar", async ({ page }) => {
   remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n${Array.from({ length: 40 }, (_, index) => `変更前ではない行 ${index + 1}`).join("\n")}\n`;
   await page.goto(`/editor?page=${pageId}`);
+  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
   await page.getByRole("textbox", { name: "タイトル" }).fill("変更したテスト");
   await page.getByRole("button", { name: /変更をまとめて保存/ }).click();
   const review = page.getByRole("dialog", { name: "変更内容を確認" });
