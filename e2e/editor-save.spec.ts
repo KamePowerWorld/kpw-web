@@ -184,6 +184,36 @@ test("mobile editor controls form two compact header rows and three metadata row
   expect(Math.abs(draft!.y + draft!.height / 2 - (source!.y + source!.height / 2))).toBeLessThan(6);
 });
 
+test("desktop metadata stays horizontal without overflowing at laptop width", async ({ page, isMobile }) => {
+  test.skip(isMobile, "PC専用レイアウトの確認");
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await page.goto(`/editor?page=${pageId}`);
+  await expect(page.locator(".sr-status")).toContainText("GitHub上の最新版");
+
+  const meta = page.locator(".editor-meta");
+  const geometry = await meta.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth);
+
+  const title = await page.getByRole("textbox", { name: "タイトル" }).boundingBox();
+  const lead = await page.getByRole("textbox", { name: "リード文" }).boundingBox();
+  const discard = await page.getByRole("button", { name: "編集を破棄" }).boundingBox();
+  expect(title).not.toBeNull();
+  expect(lead).not.toBeNull();
+  expect(discard).not.toBeNull();
+  expect(Math.abs(title!.y - lead!.y)).toBeLessThan(3);
+  expect(Math.abs(title!.y - discard!.y)).toBeLessThan(6);
+  expect(title!.x + title!.width).toBeLessThanOrEqual(discard!.x);
+  expect(discard!.x + discard!.width).toBeLessThanOrEqual(lead!.x);
+  expect(discard!.width).toBeGreaterThan(discard!.height * 1.5);
+
+  const draft = await page.getByRole("checkbox", { name: "まだ非公開" }).boundingBox();
+  const source = await page.getByRole("switch", { name: "Markdownソース" }).boundingBox();
+  expect(draft).not.toBeNull();
+  expect(source).not.toBeNull();
+  expect(Math.abs(draft!.y + draft!.height / 2 - (source!.y + source!.height / 2))).toBeLessThan(6);
+  expect(draft!.y).toBeGreaterThan(title!.y + title!.height);
+});
+
 test("mobile workspace fills the viewport without trailing app padding", async ({ page, isMobile }) => {
   test.skip(!isMobile, "mobile layout only");
   await page.goto(`/editor?page=${pageId}`);
