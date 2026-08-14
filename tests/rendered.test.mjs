@@ -44,7 +44,8 @@ test("nested routes render and non-canonical paths redirect", async () => {
 
 test("editor and Worker entrypoints are built", () => {
   const editor = readFileSync("src/pages/editor.astro", "utf8"); const styles = readFileSync("src/styles/global.css", "utf8");
-  assert.match(editor, /ガイドエディター/); assert.match(editor, /EditorApp/); assert.match(styles, /\.page-explorer/); assert.match(styles, /padding: 18px 16px 100px/);
+  assert.match(editor, /ガイドエディター/); assert.match(editor, /EditorApp/); assert.match(styles, /\.page-explorer/);
+  assert.match(styles, /height: calc\(100svh - 76px\)/); assert.match(styles, /padding: 18px 16px 94px/); assert.match(styles, /\.editor-app \{ padding-bottom: 0; \}/);
   assert.equal(existsSync("dist/server/entry.mjs"), true); assert.equal(existsSync("dist/server/wrangler.json"), true);
 });
 

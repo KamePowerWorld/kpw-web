@@ -150,8 +150,69 @@ function MilkdownSurface({ value, onChange, onUpload, resolveImage }: {
   return <div className="milkdown-host" ref={root} />;
 }
 
+type DiffRow = {
+  kind: "context" | "added" | "removed";
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+};
+type DiffBlock = { kind: "lines"; rows: DiffRow[] } | { kind: "fold"; rows: DiffRow[]; id: number };
+
+function splitDiffLines(value: string) {
+  if (!value) return [];
+  const lines = value.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+function buildDiffBlocks(changes: Change[], contextSize = 3): DiffBlock[] {
+  let oldLine = 1;
+  let newLine = 1;
+  const rows = changes.flatMap((change): DiffRow[] => splitDiffLines(change.value).map((text) => {
+    if (change.added) return { kind: "added", text, newLine: newLine++ };
+    if (change.removed) return { kind: "removed", text, oldLine: oldLine++ };
+    return { kind: "context", text, oldLine: oldLine++, newLine: newLine++ };
+  }));
+  const blocks: DiffBlock[] = [];
+  let foldId = 0;
+  for (let start = 0; start < rows.length;) {
+    if (rows[start].kind !== "context") {
+      let end = start + 1;
+      while (end < rows.length && rows[end].kind !== "context") end += 1;
+      blocks.push({ kind: "lines", rows: rows.slice(start, end) });
+      start = end;
+      continue;
+    }
+    let end = start + 1;
+    while (end < rows.length && rows[end].kind === "context") end += 1;
+    const group = rows.slice(start, end);
+    const keepStart = start > 0 ? contextSize : 0;
+    const keepEnd = end < rows.length ? contextSize : 0;
+    if (group.length <= keepStart + keepEnd) blocks.push({ kind: "lines", rows: group });
+    else {
+      if (keepStart) blocks.push({ kind: "lines", rows: group.slice(0, keepStart) });
+      blocks.push({ kind: "fold", rows: group.slice(keepStart, group.length - keepEnd), id: foldId++ });
+      if (keepEnd) blocks.push({ kind: "lines", rows: group.slice(group.length - keepEnd) });
+    }
+    start = end;
+  }
+  return blocks;
+}
+
 function DiffLines({ changes }: { changes: Change[] }) {
-  return <pre className="diff-lines">{changes.map((change, index) => <span key={index} className={change.added ? "diff-added" : change.removed ? "diff-removed" : ""}>{change.value}</span>)}</pre>;
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const blocks = useMemo(() => buildDiffBlocks(changes), [changes]);
+  const renderRows = (rows: DiffRow[], keyPrefix: string) => rows.map((row, index) => <div key={`${keyPrefix}-${index}`} className={`diff-line diff-${row.kind}`}>
+    <span className="diff-line-number" aria-hidden="true">{row.oldLine ?? ""}</span>
+    <span className="diff-line-number" aria-hidden="true">{row.newLine ?? ""}</span>
+    <span className="diff-marker" aria-hidden="true">{row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " "}</span>
+    <code>{row.text || " "}</code>
+  </div>);
+  return <div className="diff-lines" role="table" aria-label="変更差分">{blocks.map((block, index) => {
+    if (block.kind === "lines") return renderRows(block.rows, `lines-${index}`);
+    if (expanded.has(block.id)) return <div className="diff-expanded" key={`fold-${block.id}`}>{renderRows(block.rows, `expanded-${block.id}`)}</div>;
+    return <button key={`fold-${block.id}`} className="diff-fold" onClick={() => setExpanded((current) => new Set(current).add(block.id))}>⋯ 未変更の{block.rows.length}行を表示</button>;
+  })}</div>;
 }
 
 async function fileToDraft(file: File): Promise<AssetDraft> {
@@ -530,6 +591,8 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
           <div className="meta-controls">
             <label className="checkbox"><input type="checkbox" checked={current.data.draft} disabled={current.slug === "index"} onChange={(event) => updatePage(current.id, (page) => ({ ...page, data: { ...page.data, draft: event.target.checked } }))} />まだ非公開</label>
             <label className="source-switch"><input type="checkbox" role="switch" checked={sourceMode} onChange={(event) => { setSourceMode(event.target.checked); switchPane("edit"); }} /><span aria-hidden="true"></span>Markdownソース</label>
+          </div>
+          <div className="discard-page-cell">
             <button className="discard-page-button" disabled={!dirtyIds.has(current.id)} onClick={() => void discardCurrent()}>編集を破棄</button>
           </div>
         </div>

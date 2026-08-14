@@ -377,7 +377,7 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .explorer-help { margin: 18px 7px; color: #687b6b; font-size: 10px; line-height: 1.55; }
 .explorer-backdrop { display: none; }
 .editor-meta {
-  padding: 17px 20px; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr) auto; gap: 12px;
+  padding: 17px 20px; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr) auto auto; gap: 12px;
   background: #fff; border-bottom: 1px solid #bfd2c0;
 }
 .editor-meta label { display: grid; gap: 5px; color: #426047; font-size: 11px; font-weight: 800; }
@@ -389,6 +389,7 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .editor-meta label.checkbox { display: flex; align-items: center; flex-direction: row; }
 .editor-meta label.checkbox input { width: 18px; height: 18px; }
 .meta-controls { min-width: 185px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 8px; }
+.discard-page-cell { display: flex; align-items: center; padding-left: 12px; border-left: 1px solid #c8d8c7; }
 .source-switch { display: flex !important; flex-direction: row !important; align-items: center; cursor: pointer; }
 .source-switch input { position: absolute; opacity: 0; pointer-events: none; }
 .source-switch span { position: relative; width: 34px; height: 20px; border: 1px solid #78917c; border-radius: 99px; background: #d9e5d7; transition: .16s ease; }
@@ -441,10 +442,16 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .save-review-body { padding: 18px; overflow: auto; display: grid; gap: 15px; }
 .diff-card { min-width: 0; border: 2px solid var(--line); border-radius: 13px; overflow: hidden; background: #fff; }
 .diff-card h3 { margin: 0; padding: 11px 14px; color: var(--deep-green); background: #e9f8e5; font-size: 14px; }
-.diff-lines { max-height: 340px; margin: 0; padding: 12px 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #29452e; background: #fff; font: 12px/1.65 ui-monospace, "SFMono-Regular", Consolas, monospace; }
-.diff-lines span { display: block; min-height: 1.65em; padding: 0 14px; }
+.diff-lines { margin: 0; padding: 8px 0; overflow: visible; color: #29452e; background: #fff; font: 12px/1.65 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.diff-line { min-height: 1.65em; display: grid; grid-template-columns: 42px 42px 24px minmax(0, 1fr); }
+.diff-line-number { padding: 0 7px; color: #829184; background: #f5f8f4; border-right: 1px solid #e2e8e1; text-align: right; user-select: none; }
+.diff-marker { text-align: center; user-select: none; }
+.diff-line code { min-width: 0; padding-right: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .diff-lines .diff-added { background: #d9fbe0; color: #075d1d; }
-.diff-lines .diff-removed { background: #ffe0df; color: #8b1a12; text-decoration: line-through; }
+.diff-lines .diff-removed { background: #ffe0df; color: #8b1a12; }
+.diff-lines .diff-removed code { text-decoration: line-through; }
+.diff-fold { width: 100%; min-height: 31px; padding: 5px 12px; border: 0; border-block: 1px solid #d5e2d3; color: #416347; background: #edf5eb; font: 700 11px/1.4 inherit; cursor: pointer; }
+.diff-fold:hover, .diff-fold:focus-visible { background: #dff0dc; }
 .slug-diff, .asset-diff { margin: 0; padding: 10px 14px; border-bottom: 1px solid #d7e5d5; font-size: 12px; }
 .slug-diff { display: flex; gap: 12px; }
 .slug-diff del { background: #ffe0df; }.slug-diff ins { background: #d9fbe0; text-decoration: none; }
@@ -453,7 +460,7 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .review-cancel { background: #fff; }.review-save { color: #fff; background: var(--purple); }
 
 @media (max-width: 900px) {
-  .editor-app { padding-bottom: 76px; }
+  .editor-app { padding-bottom: 0; }
   .editor-topbar {
     position: relative; padding: 9px 12px; display: grid;
     grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
@@ -475,19 +482,20 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
   .explorer-backdrop { position: fixed; z-index: 70; inset: 0; display: block; border: 0; background: rgba(7,30,11,.42); }
   .editor-meta { padding: 13px 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .editor-meta label.wide { grid-column: 1 / -1; }
-  .meta-controls { grid-column: 1 / -1; min-width: 0; flex-direction: row; justify-content: flex-start; align-items: center; flex-wrap: wrap; }
+  .meta-controls { grid-column: 1; min-width: 0; flex-direction: row; justify-content: flex-start; align-items: center; flex-wrap: wrap; }
+  .discard-page-cell { grid-column: 2; justify-content: flex-end; padding-left: 10px; }
   .editor-actions { padding: 9px 12px; flex-wrap: wrap; }
   .editor-actions [role="status"] { width: 100%; margin-left: 0; line-height: 1.5; }
   .editor-workspace { display: block; }
-  .editor-pane, .preview-pane { display: none; height: 68svh; min-height: 0; overflow: auto; }
+  .editor-pane, .preview-pane { display: none; height: calc(100svh - 76px); min-height: 0; overflow: auto; scroll-padding-bottom: 82px; }
   .editor-pane.is-active, .preview-pane.is-active { display: block; }
   .editor-pane { border: 0; }
   .milkdown-host .milkdown { padding: 0; }
   .editor-page .milkdown-host .milkdown .ProseMirror {
-    width: 100%; min-height: 64svh; margin: 0; padding: 18px 16px 100px;
+    width: 100%; min-height: calc(100svh - 76px); margin: 0; padding: 18px 16px 94px;
   }
-  .source-editor { display: block; height: 100%; min-height: 0; padding: 18px 16px 90px; }
-  .preview-pane { padding: 12px; }
+  .source-editor { display: block; height: 100%; min-height: 0; padding: 18px 16px 94px; }
+  .preview-pane { padding: 12px 12px 94px; }
   .preview-hero { padding: 20px 18px; }
   .preview-pane .markdown-body { padding: 26px 18px 38px; }
   .mobile-pane-switcher {
@@ -505,4 +513,6 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
   .save-review-backdrop { padding: 8px; }
   .save-review { max-height: calc(100dvh - 16px); border-radius: 14px; }
   .save-review-body { padding: 10px; }
+  .diff-line { grid-template-columns: 32px 32px 20px minmax(0, 1fr); }
+  .diff-line-number { padding: 0 4px; }
 }

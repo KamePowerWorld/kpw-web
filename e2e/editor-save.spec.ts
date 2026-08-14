@@ -52,6 +52,21 @@ test("publishing a private page survives an immediate reload", async ({ page }) 
   await expect(status).toContainText(/保存したGitHub上の最新版|GitHub上の最新版/);
 });
 
+test("save review uses folded hunks and one review scrollbar", async ({ page }) => {
+  remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n${Array.from({ length: 40 }, (_, index) => `変更前ではない行 ${index + 1}`).join("\n")}\n`;
+  await page.goto(`/editor?page=${pageId}`);
+  await page.getByRole("textbox", { name: "タイトル" }).fill("変更したテスト");
+  await page.getByRole("button", { name: /変更をまとめて保存/ }).click();
+  const review = page.getByRole("dialog", { name: "変更内容を確認" });
+  await expect(review).toBeVisible();
+  const fold = review.getByRole("button", { name: /未変更の\d+行を表示/ }).first();
+  await expect(fold).toBeVisible();
+  await expect(review.locator(".diff-lines").first()).toHaveCSS("overflow-y", "visible");
+  await fold.click();
+  await expect(review.getByText("変更前ではない行 20", { exact: true })).toBeVisible();
+  await expect(review.locator(".diff-line-number")).not.toHaveCount(0);
+});
+
 test("reverted edits and a cancelled new page are no longer changes", async ({ page, isMobile }) => {
   await page.goto(`/editor?page=${pageId}`);
   const title = page.getByRole("textbox", { name: "タイトル" });
@@ -76,6 +91,10 @@ test("reverted edits and a cancelled new page are no longer changes", async ({ p
 
 test("page and workspace discard actions require confirmation", async ({ page, isMobile }) => {
   await page.goto(`/editor?page=${pageId}`);
+  const metaControls = page.locator(".meta-controls");
+  const discardCell = page.locator(".discard-page-cell");
+  await expect(discardCell.getByRole("button", { name: "編集を破棄" })).toBeVisible();
+  await expect(metaControls.getByRole("button", { name: "編集を破棄" })).toHaveCount(0);
   const title = page.getByRole("textbox", { name: "タイトル" });
   await title.fill("破棄するタイトル");
   await page.getByRole("button", { name: "編集を破棄" }).click();
@@ -93,6 +112,17 @@ test("page and workspace discard actions require confirmation", async ({ page, i
   await page.getByRole("button", { name: "すべて破棄" }).click();
   await expect(title).toHaveValue("テスト");
   await expect(page.locator(".swal2-toast")).toContainText("すべての変更を破棄しました");
+});
+
+test("mobile workspace fills the viewport without trailing app padding", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "mobile layout only");
+  await page.goto(`/editor?page=${pageId}`);
+  const app = page.locator(".editor-app");
+  const pane = page.locator(".editor-pane");
+  await expect(app).toHaveCSS("padding-bottom", "0px");
+  const geometry = await pane.evaluate((element) => ({ height: element.clientHeight, viewport: window.visualViewport?.height ?? window.innerHeight }));
+  expect(geometry.height).toBeGreaterThan(geometry.viewport * 0.82);
+  expect(geometry.height).toBeLessThanOrEqual(geometry.viewport);
 });
 
 test("editor and preview keep proportional scroll position", async ({ page, isMobile }) => {
