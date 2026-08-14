@@ -110,4 +110,19 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
     mobilePageTree.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   mobilePageTree?.addEventListener("animationend", () => mobilePageTree.classList.remove("is-highlighted"));
+
+  const desktopPageLink = document.querySelector<HTMLAnchorElement>(".desktop-nav-link");
+  const desktopPageTree = document.querySelector<HTMLElement>("#page-navigation");
+  desktopPageLink?.addEventListener("click", (event) => {
+    if (!desktopPageTree || getComputedStyle(desktopPageLink).display === "none") return;
+    event.preventDefault();
+    desktopPageTree.classList.remove("is-highlighted");
+    void desktopPageTree.offsetWidth;
+    desktopPageTree.classList.add("is-highlighted");
+    history.replaceState(null, "", "#page-navigation");
+    desktopPageTree.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  desktopPageTree?.addEventListener("animationend", (event) => {
+    if (event.target === desktopPageTree) desktopPageTree.classList.remove("is-highlighted");
+  });
 </script>

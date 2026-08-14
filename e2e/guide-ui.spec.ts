@@ -11,11 +11,15 @@ test("page tree exposes the active branch and mobile navigation opens from the h
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     await expect(navigation.getByRole("link", { name: "テスト" })).toBeVisible();
   } else {
-    const navigation = page.locator("#page-navigation .page-tree");
+    const sidebar = page.locator("#page-navigation");
+    const navigation = sidebar.locator(".page-tree");
     await expect(navigation.getByRole("link", { name: "ポイ活" })).toBeVisible();
     await expect(navigation.getByRole("link", { name: "テスト" })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("EDIT ON GITHUB")).toHaveCount(0);
-    await expect(navigation).toHaveCSS("animation-name", "pages-attention");
+    await page.getByRole("link", { name: "ページ一覧" }).click();
+    await expect(sidebar).toHaveClass(/is-highlighted/);
+    await expect(sidebar).toHaveCSS("animation-name", "desktop-pages-highlight");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   }
 });
 
