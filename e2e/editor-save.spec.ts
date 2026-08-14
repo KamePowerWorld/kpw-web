@@ -105,6 +105,14 @@ test("editor and preview keep proportional scroll position", async ({ page, isMo
   await source.evaluate((element) => { element.scrollTop = (element.scrollHeight - element.clientHeight) * 0.55; element.dispatchEvent(new Event("scroll")); });
   if (isMobile) await page.getByRole("button", { name: "プレビュー" }).click();
   await expect.poll(() => preview.evaluate((element) => element.scrollTop / Math.max(1, element.scrollHeight - element.clientHeight))).toBeGreaterThan(0.35);
+
+  if (isMobile) await page.getByRole("button", { name: "編集", exact: true }).click();
+  await page.locator(".source-switch").click();
+  const visualEditor = page.locator(".editor-pane");
+  await expect(visualEditor.locator("h2")).toHaveCount(120);
+  await visualEditor.evaluate((element) => { element.scrollTop = (element.scrollHeight - element.clientHeight) * 0.4; element.dispatchEvent(new Event("scroll")); });
+  if (isMobile) await page.getByRole("button", { name: "プレビュー" }).click();
+  await expect.poll(() => preview.evaluate((element) => element.scrollTop / Math.max(1, element.scrollHeight - element.clientHeight))).toBeGreaterThan(0.25);
 });
 
 test("top navigation, source switch and Milkdown image upload are integrated", async ({ page }) => {
