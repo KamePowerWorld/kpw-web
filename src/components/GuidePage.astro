@@ -17,6 +17,8 @@ while (parentId) {
   parentId = parent.parentId;
 }
 const treePages = pages.filter((item) => item.slug !== "index");
+const expandedPageIds = new Set([...breadcrumbs.map((item) => item.id), page.id]);
+const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPageIds.has(item.parentId));
 ---
 
 <main>
@@ -32,11 +34,11 @@ const treePages = pages.filter((item) => item.slug !== "index");
     </nav>
   </header>
 
-  <details class="mobile-page-tree" id="mobile-page-navigation">
+  <details class="mobile-page-tree" id="mobile-page-navigation" open>
     <summary>ページを探す</summary>
     <nav>
       <a class:list={["tree-link", { active: page.slug === "index" }]} href="/">トップ</a>
-      {treePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id }]} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
+      {visibleTreePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id, "has-children": item.childIds.length > 0 }]} aria-current={item.id === page.id ? "page" : undefined} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
     </nav>
   </details>
 
@@ -64,12 +66,11 @@ const treePages = pages.filter((item) => item.slug !== "index");
       <p>PAGES</p>
       <nav class="page-tree">
         <a class:list={["tree-link", { active: page.slug === "index" }]} href="/">トップ</a>
-        {treePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id }]} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
+        {visibleTreePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id, "has-children": item.childIds.length > 0 }]} aria-current={item.id === page.id ? "page" : undefined} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
       </nav>
       {page.headings.length > 0 && <><p class="heading-label">CONTENTS</p><nav class="heading-tree">
-        {page.headings.map((heading, index) => <a href={`#${heading.id}`}><span>{String(index + 1).padStart(2, "0")}</span>{heading.text}</a>)}
+        {page.headings.map((heading, index) => <a href={`#${heading.id}`} data-heading-id={heading.id}><span>{String(index + 1).padStart(2, "0")}</span>{heading.text}</a>)}
       </nav></>}
-      <div class="mini-note"><b>EDIT ON GITHUB</b><span>この本文はみんなで編集できるMarkdownです。</span></div>
     </aside>
     <div class="article-column">
       <article class="markdown-body notion-article" set:html={page.html}></article>
@@ -81,3 +82,16 @@ const treePages = pages.filter((item) => item.slug !== "index");
   </div>
   <footer><img src={logoDataUrl} alt="" /><div><b>かめぱわぁ〜るど</b><span>みんなでつくる、ちょっと変な遊び場。</span></div></footer>
 </main>
+
+<script>
+  const headingLinks = [...document.querySelectorAll<HTMLAnchorElement>(".heading-tree [data-heading-id]")];
+  const headingElements = headingLinks.map((link) => document.getElementById(link.dataset.headingId ?? "")).filter((heading): heading is HTMLElement => Boolean(heading));
+  const updateActiveHeading = () => {
+    const marker = Math.min(window.innerHeight * 0.3, 220);
+    let active = headingElements[0];
+    for (const heading of headingElements) if (heading.getBoundingClientRect().top <= marker) active = heading;
+    headingLinks.forEach((link) => link.classList.toggle("active", link.dataset.headingId === active?.id));
+  };
+  updateActiveHeading();
+  document.addEventListener("scroll", updateActiveHeading, { passive: true });
+</script>
