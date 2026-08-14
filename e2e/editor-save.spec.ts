@@ -131,3 +131,19 @@ test("top navigation, source switch and Milkdown image upload are integrated", a
   await page.locator('.milkdown-host input[type="file"]').last().setInputFiles({ name: "sample.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") });
   await expect(page.locator(".milkdown-host img")).toHaveAttribute("src", /^data:image\/png;base64,/);
 });
+
+test("Milkdown serializes bullet lists and horizontal rules with hyphens", async ({ page }) => {
+  remoteContent = `---\nid: ${pageId}\ntitle: テスト\ndraft: true\nheroLead: あああ\n---\n\n# テスト\n\n- ひとつ\n- ふたつ\n\n---\n\n本文\n`;
+  await page.goto(`/editor?page=${pageId}`);
+  const editor = page.locator(".milkdown-host .ProseMirror");
+  await editor.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("追記");
+  await page.locator(".source-switch").click();
+  const source = page.locator(".source-editor");
+  await expect(source).toHaveValue(/^- ひとつ$/m);
+  await expect(source).toHaveValue(/^- ふたつ$/m);
+  await expect(source).toHaveValue(/^---$/m);
+  await expect(source).not.toHaveValue(/^\* (?:ひとつ|ふたつ)$/m);
+  await expect(source).not.toHaveValue(/^\*{3}$/m);
+});

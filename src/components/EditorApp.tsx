@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
+import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import DOMPurify from "dompurify";
 import { diffLines, type Change } from "diff";
 import { marked } from "marked";
@@ -139,6 +140,9 @@ function MilkdownSurface({ value, onChange, onUpload, resolveImage }: {
       inlineUploadButton: "画像を選ぶ", blockUploadButton: "画像を選ぶ",
       inlineUploadPlaceholderText: "画像URL、またはファイルを選択", blockUploadPlaceholderText: "画像URL、またはファイルを選択",
     } } });
+    crepe.editor.config((ctx) => ctx.update(remarkStringifyOptionsCtx, (options) => ({
+      ...options, bullet: "-" as const, rule: "-" as const, ruleRepetition: 3, ruleSpaces: false,
+    })));
     crepe.on((listener) => listener.markdownUpdated((_ctx, markdown) => { if (markdown !== value) onChange(markdown); }));
     void crepe.create();
     return () => { void crepe.destroy(); };

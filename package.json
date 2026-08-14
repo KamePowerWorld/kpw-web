@@ -25,6 +25,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@milkdown/crepe": "7.22.0",
+    "@milkdown/kit": "7.22.0",
     "@milkdown/react": "7.22.0",
     "astro": "7.2.0",
     "diff": "^9.0.0",
