@@ -7,7 +7,7 @@ test("Git author uses the stable Discord username instead of nickname or numeric
   const author = discordGitAuthor(user);
   assert.equal(author.name, "kamesuta");
   assert.doesNotMatch(author.name, /かめっち|100000000000000001/);
-  assert.match(author.email, /^discord-\d+@kamepowerworld\.invalid$/);
+  assert.equal(author.email, "discord-100000000000000001@kpw.local");
 });
 
 test("Git author strips commit header delimiters from an unexpected username", () => {
@@ -17,7 +17,7 @@ test("Git author strips commit header delimiters from an unexpected username", (
 });
 
 test("Git committer uses the GitHub App bot identity", () => {
-  const committer = githubAppCommitter({ id: 123456, login: "kamepowerworldeditor[bot]" });
-  assert.equal(committer.name, "kamepowerworldeditor[bot]");
-  assert.equal(committer.email, "123456+kamepowerworldeditor[bot]@users.noreply.github.com");
+  const committer = githubAppCommitter({ id: 123456, login: "kpw-editor[bot]" });
+  assert.equal(committer.name, "kpw-editor[bot]");
+  assert.equal(committer.email, "123456+kpw-editor[bot]@users.noreply.github.com");
 });

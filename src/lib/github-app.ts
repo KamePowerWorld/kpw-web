@@ -5,7 +5,7 @@ export const githubConfig = () => ({
   owner: runtimeEnv.GITHUB_OWNER || "KamePowerWorld",
   repo: runtimeEnv.GITHUB_REPO || "kpw-docs",
   branch: runtimeEnv.GITHUB_BRANCH || "master",
-  appSlug: runtimeEnv.GITHUB_APP_SLUG || "kamepowerworldeditor",
+  appSlug: runtimeEnv.GITHUB_APP_SLUG || "kpw-editor",
 });
 
 export class GitHubError extends Error {

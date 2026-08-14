@@ -38,7 +38,7 @@
     "GITHUB_OWNER": "KamePowerWorld",
     "GITHUB_REPO": "kpw-docs",
     "GITHUB_BRANCH": "master",
-    "GITHUB_APP_SLUG": "kamepowerworldeditor"
+    "GITHUB_APP_SLUG": "kpw-editor"
   },
   "observability": {
     "enabled": true,
