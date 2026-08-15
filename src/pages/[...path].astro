@@ -61,6 +61,9 @@ const structuredData = [
   canonicalPath={page.canonicalPath}
   imagePath={page.heroImageUrl}
   imageAlt={page.data.title}
+  preloadImageSrc={page.heroImage?.src}
+  preloadImageSrcSet={page.heroImage?.srcset}
+  preloadImageSizes={page.heroImage ? "(max-width: 720px) calc(100vw - 48px), 610px" : undefined}
   pageType="article"
   structuredData={structuredData}
 >

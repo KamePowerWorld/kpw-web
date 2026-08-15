@@ -31,6 +31,11 @@ test("nested routes render and non-canonical paths redirect", async () => {
   assert.equal(home.status, 200); assert.match(homeHtml, /かめぱわぁ〜るど 遊びかたガイド/); assert.match(homeHtml, /子ページ/);
   const page = await fetch(`${origin}/2026-poikatsu`); const pageHtml = await page.text();
   assert.equal(page.status, 200); assert.match(pageHtml, /2026 ポイ活生活鯖/); assert.match(pageHtml, /\/content\/2026-poikatsu\/assets\/image-2\.png/);
+  assert.match(pageHtml, /srcset="[^"]+\.webp 320w/); assert.match(pageHtml, /fetchpriority="high"/);
+  assert.match(pageHtml, /<link rel="preload" as="image"[^>]+imagesrcset=/);
+  assert.match(pageHtml, /width="5334" height="2792"/);
+  assert.match(pageHtml, /src="\/generated\/v1\/brand-logo-96\.webp" srcset="\/generated\/v1\/brand-logo-64\.webp 64w/);
+  assert.doesNotMatch(pageHtml, /data:image\/png;base64/);
   assert.doesNotMatch(pageHtml, /クレジット|credits|eyebrow/);
   const wrongParent = await fetch(`${origin}/old-parent/2026-poikatsu?from=old`, { redirect: "manual" });
   assert.equal(wrongParent.status, 308); assert.equal(wrongParent.headers.get("location"), "/2026-poikatsu?from=old");
@@ -50,6 +55,15 @@ test("site-wide icons and SEO metadata are published", async () => {
   assert.match(articleHtml, /<meta property="og:image" content="https:\/\/docs\.kamesuta\.com\/content\/2026-poikatsu\/assets\/image-1\.png"/);
   assert.match(articleHtml, /<meta name="twitter:card" content="summary_large_image"/);
   assert.match(articleHtml, /<script type="application\/ld\+json">/);
+  assert.match(articleHtml, /class="active" href="#ポイントを集めよう"/);
+
+  const favicon = await fetch(`${origin}/favicon-192.png`);
+  assert.equal(favicon.headers.get("cache-control"), "public, max-age=604800");
+  const manifest = await fetch(`${origin}/site.webmanifest`);
+  assert.equal(manifest.headers.get("cache-control"), "public, max-age=86400");
+  const brandLogo = await fetch(`${origin}/generated/v1/brand-logo-96.webp`);
+  assert.equal(brandLogo.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  assert.equal(brandLogo.headers.get("content-type"), "image/webp");
 
   const regular = await fetch(`${origin}/testtest`);
   if (regular.status === 200) {
@@ -77,10 +91,12 @@ test("site-wide icons and SEO metadata are published", async () => {
 });
 
 test("editor and Worker entrypoints are built", () => {
-  const editor = readFileSync("src/pages/editor.astro", "utf8"); const styles = readFileSync("src/styles/global.css", "utf8");
+  const editor = readFileSync("src/pages/editor.astro", "utf8"); const styles = readFileSync("src/styles/editor.css", "utf8");
   assert.match(editor, /ガイドエディター/); assert.match(editor, /EditorApp/); assert.match(styles, /\.page-explorer/);
   assert.match(styles, /height: calc\(100svh - 76px\)/); assert.match(styles, /padding: 18px 16px 94px/); assert.match(styles, /\.editor-app \{ padding-bottom: 0; \}/);
   assert.equal(existsSync("dist/server/entry.mjs"), true); assert.equal(existsSync("dist/server/wrangler.json"), true);
+  assert.equal(existsSync("src/generated-content/responsive-images.json"), true);
+  assert.match(readFileSync("src/generated-content/responsive-images.json", "utf8"), /image-1\.png/);
 });
 
 test("tree, batch save, slug reuse, and deletion policies are present", () => {

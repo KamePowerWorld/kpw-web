@@ -3,6 +3,7 @@ import sanitizeHtml from "sanitize-html";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import navigationSource from "/src/generated-content/navigation.yml?raw";
+import responsiveImageManifestSource from "../generated-content/responsive-images.json";
 
 export const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -26,6 +27,19 @@ export type Frontmatter = z.infer<typeof frontmatterSchema>;
 export type NavigationNode = { id: string; children?: NavigationNode[] };
 export type Navigation = { version: 1; tree: NavigationNode[] };
 
+interface ResponsiveImageManifestEntry {
+  width: number;
+  height: number;
+  variants: Array<{ width: number; modulePath: string }>;
+}
+
+export interface ResponsiveImage {
+  src: string;
+  srcset: string;
+  width: number;
+  height: number;
+}
+
 export interface DocPage {
   id: string;
   slug: string;
@@ -35,6 +49,7 @@ export interface DocPage {
   html: string;
   headings: Array<{ depth: number; text: string; id: string }>;
   heroImageUrl?: string;
+  heroImage?: ResponsiveImage;
   canonicalPath: string;
   parentId?: string;
   childIds: string[];
@@ -44,6 +59,25 @@ export interface DocPage {
 const markdownModules = import.meta.glob<string>("/src/generated-content/pages/*/index.md", {
   eager: true, import: "default", query: "?raw",
 });
+const responsiveImageModules = import.meta.glob<string>("/src/generated-content/pages/*/assets/*.responsive.webp", {
+  eager: true, import: "default", query: "?url",
+});
+const responsiveImageManifest = responsiveImageManifestSource as Record<string, ResponsiveImageManifestEntry>;
+
+function localAssetUrl(slug: string, assetPath: string) {
+  return `/content/${encodeURIComponent(slug)}/${assetPath}`;
+}
+
+function getResponsiveImage(slug: string, assetPath: string): ResponsiveImage | undefined {
+  const entry = responsiveImageManifest[`${slug}/${assetPath}`];
+  if (!entry) return undefined;
+  const srcset = entry.variants.map((variant) => {
+    const url = responsiveImageModules[variant.modulePath];
+    return url ? `${url} ${variant.width}w` : undefined;
+  }).filter((item): item is string => Boolean(item)).join(", ");
+  if (!srcset) return undefined;
+  return { src: localAssetUrl(slug, assetPath), srcset, width: entry.width, height: entry.height };
+}
 
 function parseDocument(source: string) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -69,15 +103,21 @@ export function renderMarkdown(source: string, slug: string) {
     return `<h${depth} id="${id}">${text}</h${depth}>`;
   };
   renderer.image = ({ href, title, text }) => {
-    const sourceUrl = href.startsWith("./assets/") ? `/content/${encodeURIComponent(slug)}/${href.slice(2)}` : href;
+    const localAssetPath = href.startsWith("./assets/") ? href.slice(2) : undefined;
+    const responsiveImage = localAssetPath ? getResponsiveImage(slug, localAssetPath) : undefined;
+    const sourceUrl = localAssetPath ? localAssetUrl(slug, localAssetPath) : href;
     const safeTitle = title ? ` title="${title.replaceAll('"', "&quot;")}"` : "";
-    return `<img src="${sourceUrl}" alt="${text.replaceAll('"', "&quot;")}" loading="lazy"${safeTitle}>`;
+    const responsiveAttributes = responsiveImage
+      ? ` width="${responsiveImage.width}" height="${responsiveImage.height}" srcset="${responsiveImage.srcset}" sizes="auto, (max-width: 720px) calc(100vw - 48px), 820px"`
+      : "";
+    return `<img src="${sourceUrl}" alt="${text.replaceAll('"', "&quot;")}" loading="lazy" decoding="async"${responsiveAttributes}${safeTitle}>`;
   };
   const raw = marked.parse(source, { gfm: true, renderer }) as string;
   const html = sanitizeHtml(raw, {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
     allowedAttributes: {
-      a: ["href", "title", "target", "rel"], img: ["src", "alt", "title", "loading"],
+      a: ["href", "title", "target", "rel"],
+      img: ["src", "alt", "title", "loading", "decoding", "width", "height", "srcset", "sizes"],
       h1: ["id"], h2: ["id"], h3: ["id"], h4: ["id"], h5: ["id"], h6: ["id"], code: ["class"],
     },
     allowedSchemes: ["http", "https", "mailto"],
@@ -99,9 +139,11 @@ function buildAllPages() {
     const parsed = parseDocument(source);
     const data = frontmatterSchema.parse(parsed.data);
     const { html, headings } = renderMarkdown(parsed.content, slug);
+    const heroImagePath = data.heroImage?.slice(2);
     return {
       id: data.id, slug, filePath: `pages/${slug}/index.md`, data, body: parsed.content, html, headings,
-      heroImageUrl: data.heroImage ? `/content/${encodeURIComponent(slug)}/${data.heroImage.slice(2)}` : undefined,
+      heroImageUrl: heroImagePath ? localAssetUrl(slug, heroImagePath) : undefined,
+      heroImage: heroImagePath ? getResponsiveImage(slug, heroImagePath) : undefined,
       canonicalPath: slug === "index" ? "/" : `/${slug}`, childIds: [], depth: 0, parentId: undefined,
     } satisfies DocPage;
   });

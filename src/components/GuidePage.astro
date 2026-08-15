@@ -1,6 +1,6 @@
 ---
 import type { DocPage } from "../lib/content";
-import { logoDataUrl, mascotDataUrl } from "../lib/brand-assets";
+import { mascotDataUrl } from "../lib/brand-assets";
 
 interface Props { page: DocPage; pages: DocPage[]; }
 const { page, pages } = Astro.props;
@@ -25,7 +25,7 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
   <div class="top-strip" aria-hidden="true"></div>
   <header class="site-header">
     <a class="brand" href="/" aria-label="かめぱわぁ〜るど ガイド トップ">
-      <img src={logoDataUrl} alt="かめぱわぁ〜るど" /><span>みんなのガイド</span>
+      <img src="/generated/v1/brand-logo-96.webp" srcset="/generated/v1/brand-logo-64.webp 64w, /generated/v1/brand-logo-96.webp 96w, /generated/v1/brand-logo-128.webp 128w, /generated/v1/brand-logo-192.webp 192w" sizes="(max-width: 800px) 48px, 58px" width="192" height="192" alt="かめぱわぁ〜るど" /><span>みんなのガイド</span>
     </a>
     <nav class="header-links" aria-label="サイト内リンク">
       <a class="desktop-nav-link" href="#page-navigation">ページ一覧</a>
@@ -57,7 +57,17 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
       </div>
       <div class:list={["hero-art", { "hero-art-with-image": hasHeroImage }]}>
         <div class="speech">いっしょに遊ぼ！</div>
-        <img src={page.heroImageUrl ?? mascotDataUrl} alt={page.heroImageUrl ? page.data.title : "かめっち"} />
+        <img
+          src={page.heroImageUrl ?? mascotDataUrl}
+          srcset={page.heroImage?.srcset}
+          sizes={page.heroImage ? "(max-width: 720px) calc(100vw - 48px), 610px" : undefined}
+          width={page.heroImage?.width}
+          height={page.heroImage?.height}
+          loading={page.heroImage ? "eager" : undefined}
+          decoding={page.heroImage ? "async" : undefined}
+          fetchpriority={page.heroImage ? "high" : undefined}
+          alt={page.heroImageUrl ? page.data.title : "かめっち"}
+        />
       </div>
     </section>
   </div>
@@ -71,7 +81,7 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
         {visibleTreePages.map((item) => <a class:list={["tree-link", { active: item.id === page.id, "has-children": item.childIds.length > 0 }]} aria-current={item.id === page.id ? "page" : undefined} style={`--depth:${item.depth}`} href={item.canonicalPath}>{item.data.title}</a>)}
       </nav>
       {page.headings.length > 0 && <><p class="heading-label">CONTENTS</p><nav class="heading-tree">
-        {page.headings.map((heading, index) => <a href={`#${heading.id}`} data-heading-id={heading.id}><span>{String(index + 1).padStart(2, "0")}</span>{heading.text}</a>)}
+        {page.headings.map((heading, index) => <a class:list={{ active: index === 0 }} href={`#${heading.id}`} data-heading-id={heading.id}><span>{String(index + 1).padStart(2, "0")}</span>{heading.text}</a>)}
       </nav></>}
     </aside>
     <div class="article-column">
@@ -82,20 +92,32 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
       </section>}
     </div>
   </div>
-  <footer><img src={logoDataUrl} alt="" /><div><b>かめぱわぁ〜るど</b><span>みんなでつくる、ちょっと変な遊び場。</span></div></footer>
+  <footer><img src="/generated/v1/brand-logo-96.webp" srcset="/generated/v1/brand-logo-64.webp 64w, /generated/v1/brand-logo-96.webp 96w, /generated/v1/brand-logo-128.webp 128w, /generated/v1/brand-logo-192.webp 192w" sizes="48px" width="192" height="192" alt="" loading="lazy" decoding="async" /><div><b>かめぱわぁ〜るど</b><span>みんなでつくる、ちょっと変な遊び場。</span></div></footer>
 </main>
 
 <script>
   const headingLinks = [...document.querySelectorAll<HTMLAnchorElement>(".heading-tree [data-heading-id]")];
   const headingElements = headingLinks.map((link) => document.getElementById(link.dataset.headingId ?? "")).filter((heading): heading is HTMLElement => Boolean(heading));
-  const updateActiveHeading = () => {
-    const marker = Math.min(window.innerHeight * 0.3, 220);
-    let active = headingElements[0];
-    for (const heading of headingElements) if (heading.getBoundingClientRect().top <= marker) active = heading;
+  const activateHeading = (active: HTMLElement) => {
     headingLinks.forEach((link) => link.classList.toggle("active", link.dataset.headingId === active?.id));
   };
-  updateActiveHeading();
-  document.addEventListener("scroll", updateActiveHeading, { passive: true });
+  headingLinks.forEach((link, index) => link.addEventListener("click", () => {
+    const heading = headingElements[index];
+    if (heading) activateHeading(heading);
+  }));
+  if ("IntersectionObserver" in window) {
+    const visibleHeadings = new Set<HTMLElement>();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const heading = entry.target as HTMLElement;
+        if (entry.isIntersecting) visibleHeadings.add(heading);
+        else visibleHeadings.delete(heading);
+      });
+      const active = headingElements.findLast((heading) => visibleHeadings.has(heading));
+      if (active) activateHeading(active);
+    }, { rootMargin: "0px 0px -70% 0px" });
+    headingElements.forEach((heading) => observer.observe(heading));
+  }
 
   const mobilePageLink = document.querySelector<HTMLAnchorElement>(".mobile-nav-link");
   const mobilePageTree = document.querySelector<HTMLDetailsElement>("#mobile-page-navigation");

@@ -8,6 +8,9 @@ interface Props {
   canonicalPath?: string;
   imagePath?: string;
   imageAlt?: string;
+  preloadImageSrc?: string;
+  preloadImageSrcSet?: string;
+  preloadImageSizes?: string;
   pageType?: "website" | "article";
   noIndex?: boolean;
   structuredData?: Record<string, unknown> | Record<string, unknown>[];
@@ -20,6 +23,9 @@ const {
   canonicalPath,
   imagePath,
   imageAlt,
+  preloadImageSrc,
+  preloadImageSrcSet,
+  preloadImageSizes,
   pageType = "website",
   noIndex = false,
   structuredData,
@@ -47,6 +53,14 @@ const jsonLd = structuredData
     <link rel="icon" type="image/png" href="/favicon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    {preloadImageSrc && <link
+      rel="preload"
+      as="image"
+      href={preloadImageSrc}
+      imagesrcset={preloadImageSrcSet}
+      imagesizes={preloadImageSizes}
+      fetchpriority="high"
+    />}
     <meta property="og:site_name" content="かめぱわぁ〜るど みんなのガイド" />
     <meta property="og:locale" content="ja_JP" />
     <meta property="og:type" content={pageType} />

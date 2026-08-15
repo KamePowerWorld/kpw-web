@@ -3,6 +3,7 @@ export const prerender = false;
 
 import EditorApp from "../components/EditorApp";
 import BaseLayout from "../layouts/BaseLayout.astro";
+import "../styles/editor.css";
 import { loadNavigation, loadPages } from "../lib/content";
 
 const docs = loadPages({ includeDrafts: true }).map(({ id, slug, filePath, body, data, canonicalPath, parentId, childIds, depth }) => ({ id, slug, filePath, body, data, canonicalPath, parentId, childIds, depth }));

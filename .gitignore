@@ -4,6 +4,7 @@ dist/
 .content/
 src/generated-content/
 public/content/
+public/generated/
 .wrangler/
 .dev.vars
 .DS_Store
