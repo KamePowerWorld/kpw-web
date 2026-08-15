@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown, Ellipsis, FilePlus2, FileText, GripVertical, Home, Info, LockKeyhole, PencilLine, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
 import { editorViewOptionsCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import DOMPurify from "dompurify";
@@ -7,8 +9,8 @@ import { marked } from "marked";
 import Swal from "sweetalert2";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
-  DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter,
-  useSensor, useSensors, type DragEndEvent,
+  DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, closestCenter,
+  useSensor, useSensors, type DragEndEvent, type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -226,16 +228,69 @@ async function fileToDraft(file: File): Promise<AssetDraft> {
   return { name: file.name.replace(/[^A-Za-z0-9._-]/g, "-"), contentBase64: btoa(binary), mime: file.type };
 }
 
-function SortablePage({ page, access, selected, dirty, onSelect, onAdd, onRename, onDelete, onIndent, onOutdent, onPermissions }: {
-  page: PageDraft; access: PageAccess; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void;
-  onIndent: () => void; onOutdent: () => void; onPermissions: () => void;
+function PageActions({ page, access, onAdd, onRename, onDelete, onPermissions }: {
+  page: PageDraft; access: PageAccess; onAdd: () => void; onRename: () => void; onDelete: () => void; onPermissions: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const canChangePage = page.slug !== "index" && access.canManageStructure;
+  const hasMenu = access.canCreateChildren || canChangePage;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const closeOnResize = () => setOpen(false);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnResize);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnResize);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current || !menuRef.current) return;
+    const button = buttonRef.current.getBoundingClientRect();
+    const menu = menuRef.current.getBoundingClientRect();
+    const left = Math.min(window.innerWidth - menu.width - 10, Math.max(10, button.right - menu.width));
+    const below = button.bottom + 6;
+    const top = below + menu.height <= window.innerHeight - 10 ? below : Math.max(10, button.top - menu.height - 6);
+    setPosition({ top, left });
+  }, [open]);
+
+  const run = (action: () => void) => { setOpen(false); action(); };
+  return <div className="row-actions">
+    {access.canManage && <button className="row-action permission-action" onClick={onPermissions} data-tooltip="権限を設定" aria-label={page.slug === "index" ? "トップページの権限を設定" : `${page.data.title}の権限を設定`}><LockKeyhole aria-hidden="true" /></button>}
+    {hasMenu && <button ref={buttonRef} className="row-action more-action" onClick={() => setOpen((value) => !value)} aria-label={`${page.data.title}のその他の操作`} aria-haspopup="menu" aria-expanded={open}><Ellipsis aria-hidden="true" /></button>}
+    {open && createPortal(<div ref={menuRef} className="page-action-menu" role="menu" aria-label={`${page.data.title}のページ操作`} style={position}>
+      <header><span>ページ操作</span><strong>{page.data.title}</strong></header>
+      {access.canCreateChildren && <div className="page-action-menu-group"><button role="menuitem" onClick={() => run(onAdd)}><FilePlus2 aria-hidden="true" />子ページを追加</button></div>}
+      {canChangePage && <div className="page-action-menu-group">
+        <button role="menuitem" onClick={() => run(onRename)}><PencilLine aria-hidden="true" />タイトル・slugを変更</button>
+        <button role="menuitem" className="danger" onClick={() => run(onDelete)}><Trash2 aria-hidden="true" />ページを削除</button>
+      </div>}
+    </div>, document.body)}
+  </div>;
+}
+
+function SortablePage({ page, access, selected, dirty, onSelect, onAdd, onRename, onDelete, onPermissions }: {
+  page: PageDraft; access: PageAccess; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void; onPermissions: () => void;
 }) {
   const sortable = useSortable({ id: page.id, disabled: !access.canManageStructure });
-  return <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth } as React.CSSProperties}
-    className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""}`}>
-    <button className="drag-handle" disabled={!access.canManageStructure} {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}>⠿</button>
-    <button className="page-name" onClick={onSelect}>{dirty && <span className="dirty-dot" aria-label="変更済み">●</span>}{page.data.draft && <span aria-label="まだ非公開">◇</span>}{page.data.title}</button>
-    <div className="row-actions"><button disabled={!access.canManageStructure} onClick={onOutdent} title="ひとつ外側へ" aria-label="ひとつ外側へ">←</button><button disabled={!access.canManageStructure} onClick={onIndent} title="ひとつ内側へ" aria-label="ひとつ内側へ">→</button><button disabled={!access.canCreateChildren} onClick={onAdd} title="子ページを追加">＋</button><button disabled={!access.canManageStructure} onClick={onRename} title="slugを変更">⋯</button><button disabled={!access.canManageStructure} onClick={onDelete} title="削除">×</button>{access.canManage && <button onClick={onPermissions} title="権限を設定" aria-label="権限を設定">鍵</button>}</div>
+  return <div ref={sortable.setNodeRef} data-page-id={page.id} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth } as React.CSSProperties}
+    className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""} ${sortable.isOver ? "drop-target" : ""}`}>
+    {page.depth > 0 && <span className="tree-branch" aria-hidden="true" />}
+    <button className="drag-handle" disabled={!access.canManageStructure} {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}><GripVertical aria-hidden="true" /></button>
+    <button className="page-name" onClick={onSelect}>{page.childIds.length ? <ChevronDown aria-hidden="true" /> : <FileText aria-hidden="true" />}<span className="page-title">{page.data.title}</span>{page.data.draft && <span className="draft-mark" aria-label="まだ非公開">◇</span>}{dirty && <span className="dirty-dot" aria-label="未保存の変更" />}</button>
+    <PageActions page={page} access={access} onAdd={onAdd} onRename={onRename} onDelete={onDelete} onPermissions={onPermissions} />
   </div>;
 }
 
@@ -332,6 +387,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const [editorRevision, setEditorRevision] = useState(0);
   const [activePane, setActivePane] = useState<"edit" | "preview">("edit");
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [activeDragId, setActiveDragId] = useState<string>();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [permissionPage, setPermissionPage] = useState<PageDraft>();
   const persistenceEpoch = useRef(0);
@@ -462,12 +518,13 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
 
   const renameSlug = (page: PageDraft) => {
     if (page.slug === "index") return;
+    const title = window.prompt("新しいタイトル", page.data.title); if (!title?.trim()) return;
     const input = window.prompt("新しいslug", page.slug); if (!input) return;
     const slug = toSlug(input); if (!slugPattern.test(slug) || slug === "index") { setStatus("使用できないslugです"); return; }
     if (pages.some((item) => item.id !== page.id && !item.deleted && item.slug === slug)) { setStatus(`slug「${slug}」はすでに使われています`); return; }
     releaseAlias(slug, page.id);
-    updatePage(page.id, (item) => ({ ...item, slug, filePath: `pages/${slug}/index.md`, data: { ...item.data, aliases: [...new Set([...item.data.aliases.filter((alias) => alias !== slug), item.slug])] } }));
-    setStatus(`slugを「${slug}」へ変更しました。一括保存時に画像も移動します。`);
+    updatePage(page.id, (item) => ({ ...item, slug, filePath: `pages/${slug}/index.md`, data: { ...item.data, title: title.trim(), aliases: [...new Set([...item.data.aliases.filter((alias) => alias !== slug), item.slug])] } }));
+    setStatus(`タイトルとslugを変更しました。slugは「${slug}」です。`);
   };
 
   const deletePage = async (page: PageDraft) => {
@@ -485,33 +542,43 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     setNavigation((value) => normalizeNavigation({ ...value, tree: [...value.tree, { id: page.id }] }, [...allowedNavigationIds, page.id]));
   };
 
+  const handleDragStart = ({ active }: DragStartEvent) => setActiveDragId(String(active.id));
+
   const handleDragEnd = ({ active, over, delta }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-    const activeNode = findNavigationNode(safeNavigation.tree, String(active.id));
-    if (activeNode && containsNavigationNode(activeNode, String(over.id))) { setStatus("子孫ページの中へは移動できません"); return; }
-    const removed = removeNavigationNode(safeNavigation.tree, String(active.id)); if (!removed.node) return;
+    setActiveDragId(undefined);
+    if (!over) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const activeNode = findNavigationNode(safeNavigation.tree, activeId);
+    const activePosition = flatTree.findIndex((item) => item.id === activeId);
+    const activeEntry = flatTree[activePosition];
+    if (activeId === overId) {
+      if (!activeNode || !activeEntry) return;
+      const removed = removeNavigationNode(safeNavigation.tree, activeId); if (!removed.node) return;
+      if (delta.x < -34 && activeEntry.parentId) {
+        const levels = Math.max(1, Math.round(Math.abs(delta.x) / 34));
+        let anchorId = activeEntry.parentId;
+        for (let level = 1; level < levels; level += 1) {
+          const anchor = flatTree.find((item) => item.id === anchorId);
+          if (!anchor?.parentId) break;
+          anchorId = anchor.parentId;
+        }
+        const tree = insertNavigationRelative(removed.tree, anchorId, removed.node, true);
+        setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setStatus("ページを外側の階層へ移動しました。まとめて保存できます。");
+      } else if (delta.x > 34) {
+        const previous = activePosition > 0 ? flatTree[activePosition - 1] : undefined;
+        if (!previous || previous.id === activeEntry.parentId || containsNavigationNode(activeNode, previous.id)) return;
+        const tree = appendNavigationChild(removed.tree, previous.id, removed.node);
+        setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setStatus("ページを内側の階層へ移動しました。まとめて保存できます。");
+      }
+      return;
+    }
+    if (activeNode && containsNavigationNode(activeNode, overId)) { setStatus("子孫ページの中へは移動できません"); return; }
+    const removed = removeNavigationNode(safeNavigation.tree, activeId); if (!removed.node) return;
     let tree = removed.tree;
-    if (delta.x > 34) tree = appendNavigationChild(tree, String(over.id), removed.node);
-    else tree = insertNavigationRelative(tree, String(over.id), removed.node, delta.y > 0);
+    if (delta.x > 34) tree = appendNavigationChild(tree, overId, removed.node);
+    else tree = insertNavigationRelative(tree, overId, removed.node, delta.y > 0);
     setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setStatus("ページツリーを変更しました。まとめて保存できます。");
-  };
-
-  const indentPage = (page: PageDraft) => {
-    const position = flatTree.findIndex((item) => item.id === page.id);
-    const previous = position > 0 ? flatTree[position - 1] : undefined;
-    if (!previous || previous.id === page.parentId) { setStatus("このページを内側へ移動できる直前のページがありません"); return; }
-    const activeNode = findNavigationNode(safeNavigation.tree, page.id);
-    if (!activeNode || containsNavigationNode(activeNode, previous.id)) return;
-    const removed = removeNavigationNode(safeNavigation.tree, page.id);
-    setNavigation(normalizeNavigation({ version: 1, tree: appendNavigationChild(removed.tree, previous.id, removed.node!) }, allowedNavigationIds));
-    setStatus("ページをひとつ内側へ移動しました");
-  };
-
-  const outdentPage = (page: PageDraft) => {
-    if (!page.parentId) { setStatus("このページはすでに最上位です"); return; }
-    const removed = removeNavigationNode(safeNavigation.tree, page.id); if (!removed.node) return;
-    setNavigation(normalizeNavigation({ version: 1, tree: insertNavigationRelative(removed.tree, page.parentId, removed.node, true) }, allowedNavigationIds));
-    setStatus("ページをひとつ外側へ移動しました");
   };
 
   const uploadImage = async (file: File) => {
@@ -646,6 +713,9 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
 
   if (!current) return <p>編集できるページがありません。</p>;
   const exitPath = baselineDecorated.find((page) => page.id === current.id)?.canonicalPath ?? "/";
+  const indexPage = decorated.find((page) => page.slug === "index" && !page.deleted)!;
+  const indexAccess = accessByPage[indexPage.id] ?? deniedAccess;
+  const activeDragPage = treePages.find((page) => page.id === activeDragId);
   return <div className="editor-app">
     <header className="editor-topbar">
       <a href={exitPath} className="editor-brand">← 編集をやめる</a>
@@ -657,21 +727,27 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     </header>
     <div className="editor-layout">
       <aside className={`page-explorer ${explorerOpen ? "open" : ""}`}>
-        <div className="explorer-heading"><strong>ページ</strong><button disabled={!accessByPage[pages.find((page) => page.slug === "index")?.id ?? ""]?.canCreateChildren} onClick={() => createPage()}>＋ ルートに追加</button></div>
-        <button className="discard-all-button" disabled={!dirtyIds.size && !treeDirty} onClick={() => void discardAll()}>変更をすべて破棄</button>
-        <div className={`index-row ${current.slug === "index" ? "selected" : ""}`}>
-          <button className="index-page" onClick={() => selectPage(pages.find((page) => page.slug === "index")!.id)}>
-            {dirtyIds.has(pages.find((page) => page.slug === "index")!.id) && <span className="dirty-dot">●</span>}⌂ トップページ
-          </button>
-          {accessByPage[pages.find((page) => page.slug === "index")!.id]?.canManage && <button className="index-permissions" onClick={() => setPermissionPage(pages.find((page) => page.slug === "index")!)} title="トップページの権限を設定" aria-label="トップページの権限を設定">鍵</button>}
+        <header className="explorer-heading">
+          <span><small>KPW EDITOR</small><strong>ページ</strong></span>
+          <button disabled={!indexAccess.canCreateChildren} onClick={() => createPage()}><Plus aria-hidden="true" />新規ページ</button>
+        </header>
+        <div className={`index-row explorer-row top-page ${current.slug === "index" ? "selected" : ""}`} data-page-id={indexPage.id} style={{ "--tree-depth": 0 } as React.CSSProperties}>
+          <span className="tree-leading" aria-hidden="true" />
+          <button className="index-page page-name" onClick={() => selectPage(indexPage.id)}><Home aria-hidden="true" /><span className="page-title">トップページ</span>{dirtyIds.has(indexPage.id) && <span className="dirty-dot" aria-label="未保存の変更" />}</button>
+          <PageActions page={indexPage} access={indexAccess} onAdd={() => createPage(indexPage.id)} onRename={() => undefined} onDelete={() => undefined} onPermissions={() => setPermissionPage(indexPage)} />
         </div>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragCancel={() => setActiveDragId(undefined)} onDragEnd={handleDragEnd}>
           <SortableContext items={treePages.map((page) => page.id)} strategy={verticalListSortingStrategy}>
-            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} access={accessByPage[page.id] ?? deniedAccess} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => deletePage(page)} onIndent={() => indentPage(page)} onOutdent={() => outdentPage(page)} onPermissions={() => setPermissionPage(page)} />)}</div>
+            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} access={accessByPage[page.id] ?? deniedAccess} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => void deletePage(page)} onPermissions={() => setPermissionPage(page)} />)}</div>
           </SortableContext>
+          <DragOverlay dropAnimation={null}>{activeDragPage && <div className="explorer-drag-overlay"><GripVertical aria-hidden="true" /><span>{activeDragPage.data.title}</span>{activeDragPage.childIds.length > 0 && <small>子ページ {activeDragPage.childIds.length}件</small>}</div>}</DragOverlay>
         </DndContext>
         {deletedPages.length > 0 && <div className="deleted-pages"><strong>削除予定</strong>{deletedPages.map((page) => <button key={page.id} onClick={() => undoDelete(page)}><s>{page.data.title}</s><span>取り消す</span></button>)}</div>}
-        <p className="explorer-help">左右へドラッグすると親を変更できます。● は未保存の変更です。</p>
+        <div className="explorer-footer">
+          <p className="explorer-help"><Info aria-hidden="true" /><span>ハンドルを上下へドラッグして並べ替え、左右へ動かすと階層を変更できます。親を動かすと子も一緒に移動します。</span></p>
+          <p className="explorer-legend"><span className="dirty-dot" aria-hidden="true" />未保存の変更</p>
+          <button className="discard-all-button" disabled={!dirtyIds.size && !treeDirty} onClick={() => void discardAll()}><RotateCcw aria-hidden="true" />すべての変更を破棄</button>
+        </div>
       </aside>
       {explorerOpen && <button className="explorer-backdrop" aria-label="ページ一覧を閉じる" onClick={() => setExplorerOpen(false)} />}
       <div className="editor-content">

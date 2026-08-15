@@ -174,12 +174,12 @@ test("reverted edits and a cancelled new page are no longer changes", async ({ p
   const answers = ["一時ページ", "temporary-page"];
   page.on("dialog", async (dialog) => dialog.accept(answers.shift()));
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
-  await page.getByRole("button", { name: "＋ ルートに追加" }).click();
+  await page.getByRole("button", { name: "新規ページ" }).click();
   await expect(page.getByRole("button", { name: /保存＆公開/ })).toContainText("(2)");
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
   const selectedRow = page.locator(".explorer-row.selected");
-  await selectedRow.hover();
-  await selectedRow.getByTitle("削除").click();
+  await selectedRow.getByRole("button", { name: /その他の操作/ }).click();
+  await page.getByRole("menuitem", { name: "ページを削除" }).click();
   await page.getByRole("button", { name: "削除する" }).click();
   await expect(page.getByRole("button", { name: "保存＆公開" })).toBeVisible();
 });
@@ -202,11 +202,124 @@ test("page and workspace discard actions require confirmation", async ({ page, i
 
   await title.fill("全部破棄するタイトル");
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
-  await page.getByRole("button", { name: "変更をすべて破棄" }).click();
+  await page.getByRole("button", { name: "すべての変更を破棄" }).click();
   await expect(page.getByText("すべての変更を破棄しますか？")).toBeVisible();
   await page.getByRole("button", { name: "すべて破棄" }).click();
   await expect(title).toHaveValue("テスト");
   await expect(page.locator(".swal2-toast")).toContainText("すべての変更を破棄しました");
+});
+
+test("page explorer uses Lucide actions and a compact three-item menu", async ({ page, isMobile }) => {
+  await page.goto(`/editor?page=${pageId}`);
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const explorer = page.locator(".page-explorer");
+  await expect(explorer.getByText("KPW EDITOR")).toBeVisible();
+  await expect(explorer.getByRole("button", { name: "新規ページ" })).toBeVisible();
+  const row = explorer.locator(".explorer-row", { hasText: "テスト" });
+  await row.hover();
+  const permission = row.getByRole("button", { name: /権限を設定/ });
+  await expect(permission.locator("svg.lucide-lock-keyhole")).toBeVisible();
+  await row.getByRole("button", { name: /その他の操作/ }).click();
+  const menu = page.getByRole("menu", { name: /テストのページ操作/ });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem")).toHaveCount(3);
+  await expect(menu.getByRole("menuitem", { name: "子ページを追加" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "タイトル・slugを変更" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "ページを削除" })).toBeVisible();
+  await expect(menu).not.toContainText("ひとつ内側へ");
+  await expect(menu).not.toContainText("ひとつ外側へ");
+  const menuBox = await menu.boundingBox();
+  expect(menuBox).not.toBeNull();
+  expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
+  const answers = ["変更後のタイトル", "renamed-page"];
+  page.on("dialog", async (dialog) => dialog.accept(answers.shift()));
+  await menu.getByRole("menuitem", { name: "タイトル・slugを変更" }).click();
+  await expect(page.getByRole("textbox", { name: "タイトル" })).toHaveValue("変更後のタイトル");
+  await expect(page.getByRole("link", { name: /ページを見る/ })).toHaveAttribute("href", "/2026-poikatsu/renamed-page");
+});
+
+test("dragging a page changes hierarchy without duplicating explorer rows", async ({ page, isMobile }) => {
+  await page.goto(`/editor?page=${pageId}`);
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const explorer = page.locator(".page-explorer");
+  const answers = ["DND移動先", "dnd-target"];
+  page.on("dialog", async (dialog) => dialog.accept(answers.shift()));
+  await explorer.getByRole("button", { name: "新規ページ" }).click();
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const testRow = explorer.locator(".explorer-row", { hasText: "テスト" });
+  const handle = testRow.getByRole("button", { name: "テストを移動" });
+  const target = explorer.locator(".explorer-row", { hasText: "DND移動先" });
+  if (isMobile) {
+    await page.evaluate(async (sourcePageId) => {
+      const handle = document.querySelector(`[data-page-id="${sourcePageId}"] .drag-handle`)!;
+      const target = [...document.querySelectorAll<HTMLElement>(".explorer-row")].find((row) => row.textContent?.includes("DND移動先"))!;
+      const start = handle.getBoundingClientRect();
+      const end = target.getBoundingClientRect();
+      const touch = (x: number, y: number) => new Touch({ identifier: 1, target: handle, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y });
+      const startTouch = touch(start.x + start.width / 2, start.y + start.height / 2);
+      handle.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, touches: [startTouch], targetTouches: [startTouch], changedTouches: [startTouch] }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      const moveTouch = touch(end.x + end.width / 2, end.y + end.height / 2);
+      handle.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, cancelable: true, touches: [moveTouch], targetTouches: [moveTouch], changedTouches: [moveTouch] }));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      handle.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true, touches: [], targetTouches: [], changedTouches: [moveTouch] }));
+    }, pageId);
+  } else {
+    const handleBox = await handle.boundingBox();
+    const targetBox = await target.boundingBox();
+    expect(handleBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 10, startY, { steps: 3 });
+    await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 15 });
+    await page.mouse.up();
+  }
+  await expect(page.locator(".sr-status")).toContainText("ページツリーを変更しました");
+  await expect(explorer.locator(".explorer-row")).toHaveCount(4);
+  const ids = await explorer.locator(".explorer-row").evaluateAll((rows) => rows.map((row) => row.textContent?.trim()));
+  expect(ids.filter((title) => title?.includes("テスト"))).toHaveLength(1);
+  expect(ids.filter((title) => title?.includes("DND移動先"))).toHaveLength(1);
+});
+
+test("horizontal dragging changes only the page depth", async ({ page, isMobile }) => {
+  await page.goto(`/editor?page=${pageId}`);
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const explorer = page.locator(".page-explorer");
+  const testRow = explorer.locator(`[data-page-id="${pageId}"]`);
+  const handle = testRow.getByRole("button", { name: "テストを移動" });
+  await expect.poll(() => testRow.evaluate((row) => row.style.getPropertyValue("--tree-depth").trim())).toBe("1");
+  if (isMobile) {
+    await page.evaluate(async (sourcePageId) => {
+      const handle = document.querySelector(`[data-page-id="${sourcePageId}"] .drag-handle`)!;
+      const rect = handle.getBoundingClientRect();
+      const touch = (x: number) => new Touch({ identifier: 2, target: handle, clientX: x, clientY: rect.y + rect.height / 2, pageX: x, pageY: rect.y + rect.height / 2, screenX: x, screenY: rect.y + rect.height / 2 });
+      const start = touch(rect.x + rect.width / 2);
+      handle.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, touches: [start], targetTouches: [start], changedTouches: [start] }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      const moved = touch(rect.x + rect.width / 2 - 70);
+      handle.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, cancelable: true, touches: [moved], targetTouches: [moved], changedTouches: [moved] }));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      handle.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true, touches: [], targetTouches: [], changedTouches: [moved] }));
+    }, pageId);
+  } else {
+    const box = await handle.boundingBox();
+    expect(box).not.toBeNull();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 70, y, { steps: 12 });
+    await page.mouse.up();
+  }
+  await expect(page.locator(".sr-status")).toContainText("外側の階層へ移動しました");
+  await expect.poll(() => testRow.evaluate((row) => row.style.getPropertyValue("--tree-depth").trim())).toBe("0");
+  await expect(explorer.locator(".explorer-row")).toHaveCount(3);
+  const titles = await explorer.locator(".explorer-row").allTextContents();
+  expect(titles.filter((title) => title.includes("テスト"))).toHaveLength(1);
 });
 
 test("mobile editor controls form two compact header rows and three metadata rows", async ({ page, isMobile }) => {
