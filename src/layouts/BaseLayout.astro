@@ -1,15 +1,35 @@
 ---
 import "../styles/global.css";
-import { logoDataUrl } from "../lib/brand-assets";
 
 interface Props {
   title: string;
   description: string;
   bodyClass?: string;
   canonicalPath?: string;
+  imagePath?: string;
+  imageAlt?: string;
+  pageType?: "website" | "article";
+  noIndex?: boolean;
+  structuredData?: Record<string, unknown> | Record<string, unknown>[];
 }
 
-const { title, description, bodyClass = "", canonicalPath } = Astro.props;
+const {
+  title,
+  description,
+  bodyClass = "",
+  canonicalPath,
+  imagePath,
+  imageAlt,
+  pageType = "website",
+  noIndex = false,
+  structuredData,
+} = Astro.props;
+const siteUrl = Astro.site ?? new URL(Astro.url.origin);
+const canonicalUrl = canonicalPath ? new URL(canonicalPath, siteUrl) : undefined;
+const imageUrl = imagePath ? new URL(imagePath, siteUrl) : undefined;
+const jsonLd = structuredData
+  ? JSON.stringify(structuredData).replaceAll("<", "\\u003c")
+  : undefined;
 ---
 
 <!doctype html>
@@ -19,8 +39,30 @@ const { title, description, bodyClass = "", canonicalPath } = Astro.props;
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
     <meta name="generator" content={Astro.generator} />
-    {canonicalPath && <link rel="canonical" href={new URL(canonicalPath, Astro.url.origin)} />}
-    <link rel="icon" type="image/png" href={logoDataUrl} />
+    <meta name="application-name" content="かめぱわぁ〜るど みんなのガイド" />
+    <meta name="theme-color" content="#00c928" />
+    <meta name="robots" content={noIndex ? "noindex, nofollow" : "index, follow, max-image-preview:large"} />
+    {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" href="/favicon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta property="og:site_name" content="かめぱわぁ〜るど みんなのガイド" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:type" content={pageType} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+    <meta name="twitter:card" content={imageUrl ? "summary_large_image" : "summary"} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {imageUrl && <meta property="og:image" content={imageUrl} />}
+    {imageUrl && <meta property="og:image:secure_url" content={imageUrl} />}
+    {imageUrl && <meta property="og:image:type" content="image/png" />}
+    {imageUrl && <meta property="og:image:alt" content={imageAlt ?? title} />}
+    {imageUrl && <meta name="twitter:image" content={imageUrl} />}
+    {imageUrl && <meta name="twitter:image:alt" content={imageAlt ?? title} />}
+    {jsonLd && <script is:inline type="application/ld+json" set:html={jsonLd}></script>}
     <title>{title}</title>
   </head>
   <body class={bodyClass}>

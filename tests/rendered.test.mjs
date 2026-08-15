@@ -42,6 +42,40 @@ test("nested routes render and non-canonical paths redirect", async () => {
   const image = await fetch(`${origin}/content/2026-poikatsu/assets/image-2.png`); assert.equal(image.status, 200); assert.match(image.headers.get("content-type") ?? "", /image\/png/);
 });
 
+test("site-wide icons and SEO metadata are published", async () => {
+  const article = await fetch(`${origin}/2026-poikatsu`);
+  const articleHtml = await article.text();
+  assert.match(articleHtml, /<link rel="canonical" href="https:\/\/docs\.kamesuta\.com\/2026-poikatsu"/);
+  assert.match(articleHtml, /<meta property="og:type" content="article"/);
+  assert.match(articleHtml, /<meta property="og:image" content="https:\/\/docs\.kamesuta\.com\/content\/2026-poikatsu\/assets\/image-1\.png"/);
+  assert.match(articleHtml, /<meta name="twitter:card" content="summary_large_image"/);
+  assert.match(articleHtml, /<script type="application\/ld\+json">/);
+
+  const regular = await fetch(`${origin}/testtest`);
+  if (regular.status === 200) {
+    const regularHtml = await regular.text();
+    assert.doesNotMatch(regularHtml, /<meta property="og:image"/);
+    assert.match(regularHtml, /<meta name="twitter:card" content="summary"/);
+  }
+
+  const sitemap = await fetch(`${origin}/sitemap.xml`);
+  const sitemapXml = await sitemap.text();
+  assert.equal(sitemap.status, 200);
+  assert.match(sitemap.headers.get("content-type") ?? "", /application\/xml/);
+  assert.match(sitemapXml, /https:\/\/docs\.kamesuta\.com\/2026-poikatsu/);
+  assert.doesNotMatch(sitemapXml, /\/editor/);
+
+  const robots = await fetch(`${origin}/robots.txt`);
+  const robotsText = await robots.text();
+  assert.equal(robots.status, 200);
+  assert.match(robotsText, /Disallow: \/editor/);
+  assert.match(robotsText, /Sitemap: https:\/\/docs\.kamesuta\.com\/sitemap\.xml/);
+
+  for (const iconPath of ["/favicon.ico", "/favicon-192.png", "/favicon-512.png", "/apple-touch-icon.png", "/site.webmanifest"]) {
+    assert.equal((await fetch(`${origin}${iconPath}`)).status, 200, `${iconPath} is published`);
+  }
+});
+
 test("editor and Worker entrypoints are built", () => {
   const editor = readFileSync("src/pages/editor.astro", "utf8"); const styles = readFileSync("src/styles/global.css", "utf8");
   assert.match(editor, /ガイドエディター/); assert.match(editor, /EditorApp/); assert.match(styles, /\.page-explorer/);

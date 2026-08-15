@@ -14,8 +14,55 @@ if (requestedPath !== page.canonicalPath) {
   return Astro.redirect(`${target.pathname}${target.search}`, 308);
 }
 const pages = loadPages();
+const siteUrl = Astro.site ?? new URL(Astro.url.origin);
+const canonicalUrl = new URL(page.canonicalPath, siteUrl).href;
+const breadcrumbs: typeof pages = [];
+let ancestorId = page.parentId;
+while (ancestorId) {
+  const ancestor = pages.find((item) => item.id === ancestorId);
+  if (!ancestor) break;
+  breadcrumbs.unshift(ancestor);
+  ancestorId = ancestor.parentId;
+}
+const breadcrumbItems = [
+  { "@type": "ListItem", position: 1, name: "トップ", item: new URL("/", siteUrl).href },
+  ...breadcrumbs.map((item, index) => ({
+    "@type": "ListItem",
+    position: index + 2,
+    name: item.data.title,
+    item: new URL(item.canonicalPath, siteUrl).href,
+  })),
+  { "@type": "ListItem", position: breadcrumbs.length + 2, name: page.data.title, item: canonicalUrl },
+];
+const structuredData = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: page.data.title,
+    description: page.data.heroLead,
+    url: canonicalUrl,
+    mainEntityOfPage: canonicalUrl,
+    inLanguage: "ja",
+    ...(page.heroImageUrl ? { image: [new URL(page.heroImageUrl, siteUrl).href] } : {}),
+    author: { "@type": "Organization", name: "KamePowerWorld" },
+    publisher: {
+      "@type": "Organization",
+      name: "KamePowerWorld",
+      logo: { "@type": "ImageObject", url: new URL("/favicon-512.png", siteUrl).href },
+    },
+  },
+  { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: breadcrumbItems },
+];
 ---
 
-<BaseLayout title={`${page.data.title} | かめぱわぁ〜るど`} description={page.data.heroLead} canonicalPath={page.canonicalPath}>
+<BaseLayout
+  title={`${page.data.title} | かめぱわぁ〜るど`}
+  description={page.data.heroLead}
+  canonicalPath={page.canonicalPath}
+  imagePath={page.heroImageUrl}
+  imageAlt={page.data.title}
+  pageType="article"
+  structuredData={structuredData}
+>
   <GuidePage page={page} pages={pages} />
 </BaseLayout>

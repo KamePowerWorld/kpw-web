@@ -8,8 +8,17 @@ import { loadPages, resolvePagePath } from "../lib/content";
 const pages = loadPages();
 const page = resolvePagePath("/");
 if (!page) throw new Error("pages/index/index.md is required.");
+const siteUrl = Astro.site ?? new URL(Astro.url.origin);
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "かめぱわぁ〜るど みんなのガイド",
+  url: new URL("/", siteUrl).href,
+  description: page.data.heroLead,
+  inLanguage: "ja",
+};
 ---
 
-<BaseLayout title={page.data.title} description={page.data.heroLead} canonicalPath="/">
+<BaseLayout title={page.data.title} description={page.data.heroLead} canonicalPath="/" structuredData={structuredData}>
   <GuidePage page={page} pages={pages} />
 </BaseLayout>

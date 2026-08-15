@@ -9,6 +9,6 @@ const docs = loadPages({ includeDrafts: true }).map(({ id, slug, filePath, body,
 const navigation = loadNavigation();
 ---
 
-<BaseLayout title="ガイドエディター | かめぱわぁ〜るど" description="Discordの権限とつながるWYSIWYG Markdownエディター" bodyClass="editor-page">
+<BaseLayout title="ガイドエディター | かめぱわぁ〜るど" description="Discordの権限とつながるWYSIWYG Markdownエディター" bodyClass="editor-page" noIndex>
   <EditorApp client:only="react" initialDocs={docs} initialNavigation={navigation} />
 </BaseLayout>

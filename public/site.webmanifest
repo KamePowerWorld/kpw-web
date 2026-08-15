@@ -1,0 +1,13 @@
+{
+  "name": "かめぱわぁ〜るど みんなのガイド",
+  "short_name": "みんなのガイド",
+  "lang": "ja",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#00c928",
+  "icons": [
+    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/favicon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
