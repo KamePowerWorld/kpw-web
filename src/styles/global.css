@@ -155,10 +155,17 @@ main { min-height: 100vh; display: flex; flex-direction: column; }
   color: #315638; font-size: 12px; line-height: 1.35;
 }
 .sidebar .tree-link::before { content: "›"; margin-right: 6px; color: var(--purple); }
-.sidebar .tree-link.active { color: #fff; background: var(--deep-green); }
+.sidebar .tree-link.active {
+  margin-inline: -18px; padding-right: 18px;
+  padding-left: calc(26px + var(--depth, 0) * 14px);
+  color: #fff; background: var(--deep-green); border-radius: 0;
+}
 .sidebar.is-highlighted { animation: desktop-pages-highlight 1.15s ease-out; }
 .sidebar .tree-link.has-children::before { content: "⌄"; }
-.sidebar .heading-tree a.active { color: #fff; background: var(--deep-green); border-radius: 8px; padding-inline: 8px; }
+.sidebar .heading-tree a.active {
+  margin-inline: -18px; padding-inline: 18px;
+  color: #fff; background: var(--deep-green); border-radius: 0;
+}
 .sidebar .heading-tree a.active span { color: var(--yellow); }
 @keyframes desktop-pages-highlight {
   0%, 100% { box-shadow: 5px 6px 0 rgba(17,75,30,.16); }

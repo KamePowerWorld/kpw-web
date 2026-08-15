@@ -14,7 +14,13 @@ test("page tree exposes the active branch and mobile navigation opens from the h
     const sidebar = page.locator("#page-navigation");
     const navigation = sidebar.locator(".page-tree");
     await expect(navigation.getByRole("link", { name: "ポイ活" })).toBeVisible();
-    await expect(navigation.getByRole("link", { name: "テスト" })).toHaveAttribute("aria-current", "page");
+    const currentPage = navigation.getByRole("link", { name: "テスト" });
+    await expect(currentPage).toHaveAttribute("aria-current", "page");
+    const [sidebarBox, currentPageBox] = await Promise.all([sidebar.boundingBox(), currentPage.boundingBox()]);
+    expect(sidebarBox).not.toBeNull();
+    expect(currentPageBox).not.toBeNull();
+    expect(Math.abs(currentPageBox!.x - sidebarBox!.x)).toBeLessThanOrEqual(3);
+    expect(Math.abs(currentPageBox!.x + currentPageBox!.width - sidebarBox!.x - sidebarBox!.width)).toBeLessThanOrEqual(3);
     await expect(page.getByText("EDIT ON GITHUB")).toHaveCount(0);
     await page.getByRole("link", { name: "ページ一覧" }).click();
     await expect(sidebar).toHaveClass(/is-highlighted/);
@@ -40,6 +46,14 @@ test("contents highlights the heading currently in view", async ({ page, isMobil
   const second = links.nth(1);
   await second.click();
   await expect(second).toHaveClass(/active/);
+  const [sidebarBox, activeHeadingBox] = await Promise.all([
+    page.locator("#page-navigation").boundingBox(),
+    second.boundingBox(),
+  ]);
+  expect(sidebarBox).not.toBeNull();
+  expect(activeHeadingBox).not.toBeNull();
+  expect(Math.abs(activeHeadingBox!.x - sidebarBox!.x)).toBeLessThanOrEqual(3);
+  expect(Math.abs(activeHeadingBox!.x + activeHeadingBox!.width - sidebarBox!.x - sidebarBox!.width)).toBeLessThanOrEqual(3);
 });
 
 test("footer stays at the viewport bottom on short pages", async ({ page }) => {
