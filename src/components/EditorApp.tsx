@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Ellipsis, FilePlus2, FileText, GripVertical, Home, Info, LockKeyhole, PencilLine, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Ellipsis, FilePlus2, FileText, GripVertical, Home, Info, LockKeyhole, PencilLine, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
 import { editorViewOptionsCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import DOMPurify from "dompurify";
@@ -10,12 +10,12 @@ import Swal from "sweetalert2";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, closestCenter,
-  useSensor, useSensors, type DragEndEvent, type DragStartEvent,
+  useSensor, useSensors, type DragEndEvent, type DragMoveEvent, type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  appendNavigationChild, containsNavigationNode, findNavigationNode, flattenNavigation,
+  appendNavigationChild, containsNavigationNode, findNavigationNode,
   insertNavigationRelative, normalizeNavigation, removeNavigationNode,
   type Navigation, type NavigationNode,
 } from "../lib/navigation";
@@ -101,6 +101,61 @@ function decoratePages(pages: PageDraft[], navigation: Navigation) {
   };
   visit(navigation.tree, undefined, []);
   return copies;
+}
+
+type FlatNavigationEntry = { id: string; depth: number; parentId?: string };
+type DropProjection = {
+  depth: number;
+  parentId?: string;
+  beforeId?: string;
+  afterId?: string;
+  indicatorId: string;
+  indicatorEdge: "before" | "after";
+};
+
+function flattenVisibleNavigation(nodes: NavigationNode[], collapsedIds: Set<string>, depth = 0, parentId?: string): FlatNavigationEntry[] {
+  return nodes.flatMap((node) => [
+    { id: node.id, depth, parentId },
+    ...(collapsedIds.has(node.id) ? [] : flattenVisibleNavigation(node.children ?? [], collapsedIds, depth + 1, node.id)),
+  ]);
+}
+
+function projectNavigationDrop(entries: FlatNavigationEntry[], activeId: string, overId: string, offsetX: number, afterOver: boolean): DropProjection | undefined {
+  const active = entries.find((entry) => entry.id === activeId);
+  const over = entries.find((entry) => entry.id === overId);
+  if (!active || !over) return;
+
+  const requestedDepth = Math.max(0, active.depth + Math.round(offsetX / 22));
+  if (activeId !== overId && requestedDepth > over.depth) {
+    return { depth: over.depth + 1, parentId: over.id, indicatorId: over.id, indicatorEdge: "after" };
+  }
+
+  const remaining = entries.filter((entry) => entry.id !== activeId);
+  const overIndex = remaining.findIndex((entry) => entry.id === overId);
+  const insertionIndex = activeId === overId
+    ? Math.min(entries.findIndex((entry) => entry.id === activeId), remaining.length)
+    : Math.max(0, overIndex + (afterOver ? 1 : 0));
+  const reordered = [...remaining];
+  reordered.splice(insertionIndex, 0, active);
+  const previous = reordered[insertionIndex - 1];
+  const next = reordered[insertionIndex + 1];
+  const maximumDepth = previous ? previous.depth + 1 : 0;
+  const minimumDepth = next?.depth ?? 0;
+  const depth = Math.max(minimumDepth, Math.min(requestedDepth, maximumDepth));
+
+  let parentId: string | undefined;
+  if (depth > 0 && previous) {
+    if (previous.depth < depth) parentId = previous.id;
+    else if (previous.depth === depth) parentId = previous.parentId;
+    else parentId = reordered.slice(0, insertionIndex).reverse().find((entry) => entry.depth === depth)?.parentId;
+  }
+
+  const nextSibling = reordered.slice(insertionIndex + 1).find((entry) => entry.depth <= depth);
+  const previousSibling = reordered.slice(0, insertionIndex).reverse().find((entry) => entry.depth <= depth);
+  const beforeId = nextSibling?.depth === depth && nextSibling.parentId === parentId ? nextSibling.id : undefined;
+  const afterId = !beforeId && previousSibling?.depth === depth && previousSibling.parentId === parentId ? previousSibling.id : undefined;
+  const indicatorId = beforeId ?? afterId ?? parentId ?? over.id;
+  return { depth, parentId, beforeId, afterId, indicatorId, indicatorEdge: beforeId ? "before" : "after" };
 }
 
 function openWorkspaceDb() {
@@ -281,15 +336,19 @@ function PageActions({ page, access, onAdd, onRename, onDelete, onPermissions }:
   </div>;
 }
 
-function SortablePage({ page, access, selected, dirty, onSelect, onAdd, onRename, onDelete, onPermissions }: {
-  page: PageDraft; access: PageAccess; selected: boolean; dirty: boolean; onSelect: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void; onPermissions: () => void;
+function SortablePage({ page, access, selected, dirty, expanded, dropIndicator, onSelect, onToggle, onAdd, onRename, onDelete, onPermissions }: {
+  page: PageDraft; access: PageAccess; selected: boolean; dirty: boolean; expanded: boolean; dropIndicator?: Pick<DropProjection, "depth" | "indicatorEdge">;
+  onSelect: () => void; onToggle: () => void; onAdd: () => void; onRename: () => void; onDelete: () => void; onPermissions: () => void;
 }) {
   const sortable = useSortable({ id: page.id, disabled: !access.canManageStructure });
-  return <div ref={sortable.setNodeRef} data-page-id={page.id} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth } as React.CSSProperties}
-    className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""} ${sortable.isOver ? "drop-target" : ""}`}>
+  return <div ref={sortable.setNodeRef} data-page-id={page.id} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, "--tree-depth": page.depth, "--drop-depth": dropIndicator?.depth ?? page.depth } as React.CSSProperties}
+    className={`explorer-row ${selected ? "selected" : ""} ${sortable.isDragging ? "dragging" : ""} ${dropIndicator ? `drop-target drop-${dropIndicator.indicatorEdge}` : ""}`}>
     {page.depth > 0 && <span className="tree-branch" aria-hidden="true" />}
     <button className="drag-handle" disabled={!access.canManageStructure} {...sortable.attributes} {...sortable.listeners} aria-label={`${page.data.title}を移動`}><GripVertical aria-hidden="true" /></button>
-    <button className="page-name" onClick={onSelect}>{page.childIds.length ? <ChevronDown aria-hidden="true" /> : <FileText aria-hidden="true" />}<span className="page-title">{page.data.title}</span>{page.data.draft && <span className="draft-mark" aria-label="まだ非公開">◇</span>}{dirty && <span className="dirty-dot" aria-label="未保存の変更" />}</button>
+    {page.childIds.length
+      ? <button className="tree-toggle" onClick={onToggle} aria-label={`${page.data.title}の子ページを${expanded ? "折りたたむ" : "展開する"}`} aria-expanded={expanded}>{expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
+      : <span className="tree-page-icon" aria-hidden="true"><FileText /></span>}
+    <button className="page-name" onClick={onSelect}><span className="page-title">{page.data.title}</span>{page.data.draft && <span className="draft-mark" aria-label="まだ非公開">◇</span>}{dirty && <span className="dirty-dot" aria-label="未保存の変更" />}</button>
     <PageActions page={page} access={access} onAdd={onAdd} onRename={onRename} onDelete={onDelete} onPermissions={onPermissions} />
   </div>;
 }
@@ -387,7 +446,9 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const [editorRevision, setEditorRevision] = useState(0);
   const [activePane, setActivePane] = useState<"edit" | "preview">("edit");
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [collapsedPageIds, setCollapsedPageIds] = useState<Set<string>>(() => new Set());
   const [activeDragId, setActiveDragId] = useState<string>();
+  const [dropProjection, setDropProjection] = useState<DropProjection>();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [permissionPage, setPermissionPage] = useState<PageDraft>();
   const persistenceEpoch = useRef(0);
@@ -414,8 +475,13 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
   const current = decorated.find((page) => page.id === selectedId && !page.deleted) ?? decorated.find((page) => page.slug === "index" && !page.deleted) ?? decorated.find((page) => !page.deleted);
   const deniedAccess: PageAccess = { canEdit: false, canCreateChildren: false, childMode: null, canManage: false, canManageStructure: false, inheritedFrom: null };
   const currentAccess = current ? accessByPage[current.id] ?? deniedAccess : deniedAccess;
-  const flatTree = useMemo(() => flattenNavigation(safeNavigation.tree), [safeNavigation]);
-  const treePages = flatTree.map((entry) => decorated.find((page) => page.id === entry.id)).filter((page): page is PageDraft => Boolean(page && !page.deleted));
+  const visibleFlatTree = useMemo(() => flattenVisibleNavigation(safeNavigation.tree, collapsedPageIds), [safeNavigation, collapsedPageIds]);
+  const dragTreeEntries = useMemo(() => {
+    if (!activeDragId) return visibleFlatTree;
+    const activeNode = findNavigationNode(safeNavigation.tree, activeDragId);
+    return activeNode ? visibleFlatTree.filter((entry) => entry.id === activeDragId || !containsNavigationNode(activeNode, entry.id)) : visibleFlatTree;
+  }, [visibleFlatTree, safeNavigation, activeDragId]);
+  const treePages = dragTreeEntries.map((entry) => decorated.find((page) => page.id === entry.id)).filter((page): page is PageDraft => Boolean(page && !page.deleted));
   const deletedPages = pages.filter((page) => page.deleted);
 
   useEffect(() => {
@@ -513,6 +579,7 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
       ? { canEdit: true, canCreateChildren: true, childMode: "custom", canManage: true, canManageStructure: true, inheritedFrom: null }
       : { ...parentAccess, canEdit: true, canManage: false, canManageStructure: false } }));
     setNavigation((value) => normalizeNavigation({ ...value, tree: parentId ? appendNavigationChild(value.tree, parentId, { id }) : [...value.tree, { id }] }, [...allowedNavigationIds, id]));
+    if (effectiveParentId) setCollapsedPageIds((currentIds) => { const nextIds = new Set(currentIds); nextIds.delete(effectiveParentId); return nextIds; });
     selectPage(id); setStatus("新しいページを追加しました。まだ公開側には保存されていません。");
   };
 
@@ -542,43 +609,36 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
     setNavigation((value) => normalizeNavigation({ ...value, tree: [...value.tree, { id: page.id }] }, [...allowedNavigationIds, page.id]));
   };
 
-  const handleDragStart = ({ active }: DragStartEvent) => setActiveDragId(String(active.id));
+  const droppedAfterTarget = (active: DragMoveEvent["active"], over: NonNullable<DragMoveEvent["over"]>) => {
+    const translated = active.rect.current.translated;
+    const activeCenter = translated ? translated.top + translated.height / 2 : (active.rect.current.initial?.top ?? 0);
+    return activeCenter >= over.rect.top + over.rect.height / 2;
+  };
+
+  const handleDragStart = ({ active }: DragStartEvent) => { setActiveDragId(String(active.id)); setDropProjection(undefined); };
+  const handleDragMove = ({ active, over, delta }: DragMoveEvent) => {
+    if (!over) { setDropProjection(undefined); return; }
+    setDropProjection(projectNavigationDrop(dragTreeEntries, String(active.id), String(over.id), delta.x, droppedAfterTarget(active, over)));
+  };
 
   const handleDragEnd = ({ active, over, delta }: DragEndEvent) => {
     setActiveDragId(undefined);
+    setDropProjection(undefined);
     if (!over) return;
     const activeId = String(active.id);
     const overId = String(over.id);
     const activeNode = findNavigationNode(safeNavigation.tree, activeId);
-    const activePosition = flatTree.findIndex((item) => item.id === activeId);
-    const activeEntry = flatTree[activePosition];
-    if (activeId === overId) {
-      if (!activeNode || !activeEntry) return;
-      const removed = removeNavigationNode(safeNavigation.tree, activeId); if (!removed.node) return;
-      if (delta.x < -34 && activeEntry.parentId) {
-        const levels = Math.max(1, Math.round(Math.abs(delta.x) / 34));
-        let anchorId = activeEntry.parentId;
-        for (let level = 1; level < levels; level += 1) {
-          const anchor = flatTree.find((item) => item.id === anchorId);
-          if (!anchor?.parentId) break;
-          anchorId = anchor.parentId;
-        }
-        const tree = insertNavigationRelative(removed.tree, anchorId, removed.node, true);
-        setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setStatus("ページを外側の階層へ移動しました。まとめて保存できます。");
-      } else if (delta.x > 34) {
-        const previous = activePosition > 0 ? flatTree[activePosition - 1] : undefined;
-        if (!previous || previous.id === activeEntry.parentId || containsNavigationNode(activeNode, previous.id)) return;
-        const tree = appendNavigationChild(removed.tree, previous.id, removed.node);
-        setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setStatus("ページを内側の階層へ移動しました。まとめて保存できます。");
-      }
-      return;
-    }
-    if (activeNode && containsNavigationNode(activeNode, overId)) { setStatus("子孫ページの中へは移動できません"); return; }
+    if (activeId !== overId && activeNode && containsNavigationNode(activeNode, overId)) { setStatus("子孫ページの中へは移動できません"); return; }
+    const projection = projectNavigationDrop(dragTreeEntries, activeId, overId, delta.x, droppedAfterTarget(active, over));
+    if (!projection) return;
     const removed = removeNavigationNode(safeNavigation.tree, activeId); if (!removed.node) return;
-    let tree = removed.tree;
-    if (delta.x > 34) tree = appendNavigationChild(tree, overId, removed.node);
-    else tree = insertNavigationRelative(tree, overId, removed.node, delta.y > 0);
+    let tree: NavigationNode[];
+    if (projection.beforeId) tree = insertNavigationRelative(removed.tree, projection.beforeId, removed.node, false);
+    else if (projection.afterId) tree = insertNavigationRelative(removed.tree, projection.afterId, removed.node, true);
+    else if (projection.parentId) tree = appendNavigationChild(removed.tree, projection.parentId, removed.node);
+    else tree = [...removed.tree, removed.node];
     setNavigation(normalizeNavigation({ version: 1, tree }, allowedNavigationIds)); setStatus("ページツリーを変更しました。まとめて保存できます。");
+    if (projection.parentId) setCollapsedPageIds((currentIds) => { const nextIds = new Set(currentIds); nextIds.delete(projection.parentId!); return nextIds; });
   };
 
   const uploadImage = async (file: File) => {
@@ -736,9 +796,9 @@ export default function EditorApp({ initialDocs, initialNavigation }: { initialD
           <button className="index-page page-name" onClick={() => selectPage(indexPage.id)}><Home aria-hidden="true" /><span className="page-title">トップページ</span>{dirtyIds.has(indexPage.id) && <span className="dirty-dot" aria-label="未保存の変更" />}</button>
           <PageActions page={indexPage} access={indexAccess} onAdd={() => createPage(indexPage.id)} onRename={() => undefined} onDelete={() => undefined} onPermissions={() => setPermissionPage(indexPage)} />
         </div>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragCancel={() => setActiveDragId(undefined)} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragCancel={() => { setActiveDragId(undefined); setDropProjection(undefined); }} onDragEnd={handleDragEnd}>
           <SortableContext items={treePages.map((page) => page.id)} strategy={verticalListSortingStrategy}>
-            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} access={accessByPage[page.id] ?? deniedAccess} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} onSelect={() => selectPage(page.id)} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => void deletePage(page)} onPermissions={() => setPermissionPage(page)} />)}</div>
+            <div className="explorer-tree">{treePages.map((page) => <SortablePage key={page.id} page={page} access={accessByPage[page.id] ?? deniedAccess} selected={page.id === current.id} dirty={dirtyIds.has(page.id)} expanded={!collapsedPageIds.has(page.id)} dropIndicator={dropProjection?.indicatorId === page.id ? dropProjection : undefined} onSelect={() => selectPage(page.id)} onToggle={() => setCollapsedPageIds((currentIds) => { const nextIds = new Set(currentIds); if (nextIds.has(page.id)) nextIds.delete(page.id); else nextIds.add(page.id); return nextIds; })} onAdd={() => createPage(page.id)} onRename={() => renameSlug(page)} onDelete={() => void deletePage(page)} onPermissions={() => setPermissionPage(page)} />)}</div>
           </SortableContext>
           <DragOverlay dropAnimation={null}>{activeDragPage && <div className="explorer-drag-overlay"><GripVertical aria-hidden="true" /><span>{activeDragPage.data.title}</span>{activeDragPage.childIds.length > 0 && <small>子ページ {activeDragPage.childIds.length}件</small>}</div>}</DragOverlay>
         </DndContext>

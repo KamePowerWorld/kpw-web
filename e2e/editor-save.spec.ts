@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const pageId = "29b1b24f-7a2a-422e-86c3-38cd942715f1";
 const indexPageId = "01dc1c48-1880-42a5-ab8b-1777262840c2";
+const parentPageId = "cad50ce0-15f4-4d04-8e5b-74950c59fe47";
 const csrfToken = "e2e-csrf-token";
 const commitBefore = "1".repeat(40);
 const commitAfter = "2".repeat(40);
@@ -239,6 +240,21 @@ test("page explorer uses Lucide actions and a compact three-item menu", async ({
   await expect(page.getByRole("link", { name: /ページを見る/ })).toHaveAttribute("href", "/2026-poikatsu/renamed-page");
 });
 
+test("page explorer collapses and expands child pages", async ({ page, isMobile }) => {
+  await page.goto(`/editor?page=${pageId}`);
+  if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
+  const explorer = page.locator(".page-explorer");
+  const child = explorer.locator(`[data-page-id="${pageId}"]`);
+  const collapse = explorer.getByRole("button", { name: "ポイ活の子ページを折りたたむ" });
+  await expect(collapse).toHaveAttribute("aria-expanded", "true");
+  await collapse.click();
+  await expect(child).toHaveCount(0);
+  const expand = explorer.getByRole("button", { name: "ポイ活の子ページを展開する" });
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expand.click();
+  await expect(child).toBeVisible();
+});
+
 test("dragging a page changes hierarchy without duplicating explorer rows", async ({ page, isMobile }) => {
   await page.goto(`/editor?page=${pageId}`);
   if (isMobile) await page.getByRole("button", { name: "☰ ページ" }).click();
@@ -254,8 +270,9 @@ test("dragging a page changes hierarchy without duplicating explorer rows", asyn
     await page.evaluate(async (sourcePageId) => {
       const handle = document.querySelector(`[data-page-id="${sourcePageId}"] .drag-handle`)!;
       const target = [...document.querySelectorAll<HTMLElement>(".explorer-row")].find((row) => row.textContent?.includes("DND移動先"))!;
+      const targetHandle = target.querySelector<HTMLElement>(".drag-handle")!;
       const start = handle.getBoundingClientRect();
-      const end = target.getBoundingClientRect();
+      const end = targetHandle.getBoundingClientRect();
       const touch = (x: number, y: number) => new Touch({ identifier: 1, target: handle, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y });
       const startTouch = touch(start.x + start.width / 2, start.y + start.height / 2);
       handle.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, touches: [startTouch], targetTouches: [startTouch], changedTouches: [startTouch] }));
@@ -275,7 +292,9 @@ test("dragging a page changes hierarchy without duplicating explorer rows", asyn
     await page.mouse.move(startX, startY);
     await page.mouse.down();
     await page.mouse.move(startX + 10, startY, { steps: 3 });
-    await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 15 });
+    const targetHandleBox = await target.getByRole("button", { name: "DND移動先を移動" }).boundingBox();
+    expect(targetHandleBox).not.toBeNull();
+    await page.mouse.move(targetHandleBox!.x + targetHandleBox!.width / 2 + 10, targetBox!.y + targetBox!.height / 2, { steps: 15 });
     await page.mouse.up();
   }
   await expect(page.locator(".sr-status")).toContainText("ページツリーを変更しました");
@@ -292,34 +311,49 @@ test("horizontal dragging changes only the page depth", async ({ page, isMobile 
   const testRow = explorer.locator(`[data-page-id="${pageId}"]`);
   const handle = testRow.getByRole("button", { name: "テストを移動" });
   await expect.poll(() => testRow.evaluate((row) => row.style.getPropertyValue("--tree-depth").trim())).toBe("1");
-  if (isMobile) {
-    await page.evaluate(async (sourcePageId) => {
-      const handle = document.querySelector(`[data-page-id="${sourcePageId}"] .drag-handle`)!;
-      const rect = handle.getBoundingClientRect();
-      const touch = (x: number) => new Touch({ identifier: 2, target: handle, clientX: x, clientY: rect.y + rect.height / 2, pageX: x, pageY: rect.y + rect.height / 2, screenX: x, screenY: rect.y + rect.height / 2 });
-      const start = touch(rect.x + rect.width / 2);
-      handle.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, touches: [start], targetTouches: [start], changedTouches: [start] }));
-      await new Promise((resolve) => setTimeout(resolve, 220));
-      const moved = touch(rect.x + rect.width / 2 - 70);
-      handle.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, cancelable: true, touches: [moved], targetTouches: [moved], changedTouches: [moved] }));
-      await new Promise((resolve) => setTimeout(resolve, 60));
-      handle.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true, touches: [], targetTouches: [], changedTouches: [moved] }));
-    }, pageId);
-  } else {
-    const box = await handle.boundingBox();
-    expect(box).not.toBeNull();
-    const x = box!.x + box!.width / 2;
-    const y = box!.y + box!.height / 2;
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(x - 70, y, { steps: 12 });
+  const drag = async (targetId: string, offsetX: number, touchId: number) => {
+    if (isMobile) {
+      await page.evaluate(async ({ sourcePageId, targetPageId, horizontalOffset, identifier }) => {
+        const source = document.querySelector<HTMLElement>(`[data-page-id="${sourcePageId}"] .drag-handle`)!;
+        const target = document.querySelector<HTMLElement>(`[data-page-id="${targetPageId}"]`)!;
+        const startRect = source.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const touch = (x: number, y: number) => new Touch({ identifier, target: source, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y });
+        const start = touch(startRect.x + startRect.width / 2, startRect.y + startRect.height / 2);
+        source.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, touches: [start], targetTouches: [start], changedTouches: [start] }));
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        const moved = touch(startRect.x + startRect.width / 2 + horizontalOffset, targetRect.y + targetRect.height / 2);
+        source.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, cancelable: true, touches: [moved], targetTouches: [moved], changedTouches: [moved] }));
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        source.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true, touches: [], targetTouches: [], changedTouches: [moved] }));
+      }, { sourcePageId: pageId, targetPageId: targetId, horizontalOffset: offsetX, identifier: touchId });
+      return;
+    }
+    const sourceBox = await handle.boundingBox();
+    const targetBox = await explorer.locator(`[data-page-id="${targetId}"]`).boundingBox();
+    expect(sourceBox).not.toBeNull(); expect(targetBox).not.toBeNull();
+    const startX = sourceBox!.x + sourceBox!.width / 2;
+    const startY = sourceBox!.y + sourceBox!.height / 2;
+    await page.mouse.move(startX, startY); await page.mouse.down();
+    await page.mouse.move(startX + Math.sign(offsetX || 1) * 8, startY, { steps: 3 });
+    await page.mouse.move(startX + offsetX, targetBox!.y + targetBox!.height / 2, { steps: 12 });
+    const indicator = explorer.locator(".drop-target");
+    await expect(indicator).toHaveCount(1);
+    await expect.poll(() => indicator.evaluate((row) => row.style.getPropertyValue("--drop-depth").trim())).toBe(offsetX < 0 ? "0" : "1");
     await page.mouse.up();
-  }
-  await expect(page.locator(".sr-status")).toContainText("外側の階層へ移動しました");
+  };
+
+  await drag(pageId, -70, 2);
+  await expect(page.locator(".sr-status")).toContainText("ページツリーを変更しました");
   await expect.poll(() => testRow.evaluate((row) => row.style.getPropertyValue("--tree-depth").trim())).toBe("0");
   await expect(explorer.locator(".explorer-row")).toHaveCount(3);
   const titles = await explorer.locator(".explorer-row").allTextContents();
   expect(titles.filter((title) => title.includes("テスト"))).toHaveLength(1);
+
+  await drag(parentPageId, 70, 3);
+  await expect.poll(() => testRow.evaluate((row) => row.style.getPropertyValue("--tree-depth").trim())).toBe("1");
+  await expect(explorer.getByRole("button", { name: "ポイ活の子ページを折りたたむ" })).toBeVisible();
+  await expect(explorer.locator(".explorer-row")).toHaveCount(3);
 });
 
 test("mobile editor controls form two compact header rows and three metadata rows", async ({ page, isMobile }) => {
