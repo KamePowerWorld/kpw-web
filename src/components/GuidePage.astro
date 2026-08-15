@@ -6,7 +6,7 @@ interface Props { page: DocPage; pages: DocPage[]; }
 const { page, pages } = Astro.props;
 const byId = new Map(pages.map((item) => [item.id, item]));
 const firstHeading = page.headings[0]?.id ?? "content";
-const isLifeServer = page.slug === "2026-poikatsu";
+const hasHeroImage = Boolean(page.heroImageUrl);
 const children = page.childIds.map((id) => byId.get(id)).filter((item): item is DocPage => Boolean(item));
 const breadcrumbs: DocPage[] = [];
 let parentId = page.parentId;
@@ -34,7 +34,7 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
     </nav>
   </header>
 
-  <div class:list={["hero-region", { "hero-region-2026": isLifeServer }]}>
+  <div class:list={["hero-region", { "hero-region-with-image": hasHeroImage }]}>
     <details class="mobile-page-tree" id="mobile-page-navigation">
       <summary>ページを探す</summary>
       <nav>
@@ -49,13 +49,13 @@ const visibleTreePages = treePages.filter((item) => !item.parentId || expandedPa
       {page.slug !== "index" && <><span>›</span><strong>{page.data.title}</strong></>}
     </nav>
 
-    <section class:list={["hero", { "hero-2026": isLifeServer }]}>
+    <section class:list={["hero", { "hero-with-image": hasHeroImage }]}>
       <div class="confetti c1">●</div><div class="confetti c2">◆</div><div class="confetti c3">▲</div><div class="confetti c4">●</div>
       <div class="hero-copy">
         <h1>{page.data.title}</h1><p class="lead">{page.data.heroLead}</p>
         <a class="hero-button" href={`#${firstHeading}`}>ガイドを見てみる <span>→</span></a>
       </div>
-      <div class:list={["hero-art", { "hero-poster": Boolean(page.heroImageUrl) }]}>
+      <div class:list={["hero-art", { "hero-art-with-image": hasHeroImage }]}>
         <div class="speech">いっしょに遊ぼ！</div>
         <img src={page.heroImageUrl ?? mascotDataUrl} alt={page.heroImageUrl ? page.data.title : "かめっち"} />
       </div>

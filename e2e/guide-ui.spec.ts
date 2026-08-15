@@ -55,13 +55,15 @@ test("mobile hero is compact with breathing room below the poster", async ({ pag
   await expect(hero).toHaveCSS("min-height", "560px");
   await expect(hero).toHaveCSS("padding-top", "12px");
   await expect(hero).toHaveCSS("padding-bottom", "34px");
-  await expect(hero.locator(".hero-poster")).toHaveCSS("margin-top", "50px");
+  await expect(hero).toHaveClass(/hero-with-image/);
+  await expect(hero.locator(".hero-art-with-image")).toHaveCSS("margin-top", "50px");
 });
 
 test("mobile regular pages omit the mascot artwork without leaving an empty hero", async ({ page, isMobile }) => {
   test.skip(!isMobile, "mobile presentation only");
   await page.goto("/2026-poikatsu/testtest");
   const hero = page.locator(".hero");
+  await expect(hero).not.toHaveClass(/hero-with-image/);
   await expect(hero.locator(".hero-art")).toBeHidden();
   await expect(hero).toHaveCSS("min-height", "0px");
   await expect(hero).toHaveCSS("padding-bottom", "34px");
