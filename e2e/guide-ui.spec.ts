@@ -38,6 +38,15 @@ test("mobile navigation and breadcrumbs share the hero background", async ({ pag
   await expect(region).toHaveCSS("background-image", /linear-gradient/);
 });
 
+test("desktop hero uses the compact presentation", async ({ page, isMobile }) => {
+  test.skip(isMobile, "desktop presentation only");
+  await page.goto("/2026-poikatsu");
+  const hero = page.locator(".hero");
+  await expect(hero).toHaveCSS("min-height", "450px");
+  await expect(hero).toHaveCSS("padding-top", "38px");
+  await expect(hero).toHaveCSS("padding-bottom", "38px");
+});
+
 test("contents highlights the heading currently in view", async ({ page, isMobile }) => {
   test.skip(isMobile, "contents sidebar is a desktop feature");
   await page.goto("/2026-poikatsu");

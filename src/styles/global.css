@@ -71,8 +71,8 @@ main { min-height: 100vh; display: flex; flex-direction: column; }
 .hero {
   position: relative;
   z-index: 1;
-  min-height: 550px;
-  padding: 68px max(28px, calc((100vw - 1120px) / 2));
+  min-height: 450px;
+  padding: 38px max(28px, calc((100vw - 1120px) / 2));
   display: grid;
   grid-template-columns: 1.35fr .65fr;
   align-items: center;
