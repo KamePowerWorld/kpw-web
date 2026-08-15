@@ -387,6 +387,7 @@ footer span, footer p { margin: 0; font-size: 11px; opacity: .72; }
 .explorer-row {
   position: relative; z-index: 1; padding-left: calc(var(--tree-depth, 0) * 22px); display: grid; grid-template-columns: 28px 22px minmax(0, 1fr) auto; align-items: center;
 }
+.index-row.explorer-row { grid-template-columns: 28px minmax(0, 1fr) auto; }
 .explorer-row:hover { z-index: 3; background: #edf8e9; }
 .index-row.selected, .explorer-row.selected { background: #e0f4da; }
 .explorer-row.selected::after {

@@ -216,6 +216,9 @@ test("page explorer uses Lucide actions and a compact three-item menu", async ({
   const explorer = page.locator(".page-explorer");
   await expect(explorer.getByText("KPW EDITOR")).toBeVisible();
   await expect(explorer.getByRole("button", { name: "新規ページ" })).toBeVisible();
+  const homeName = explorer.locator(".index-page .page-title");
+  await expect(homeName).toHaveText("トップページ");
+  await expect.poll(() => homeName.evaluate((element) => element.clientWidth >= element.scrollWidth)).toBe(true);
   const row = explorer.locator(".explorer-row", { hasText: "テスト" });
   await row.hover();
   const permission = row.getByRole("button", { name: /権限を設定/ });
