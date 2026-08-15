@@ -42,9 +42,29 @@ test("desktop hero uses the compact presentation", async ({ page, isMobile }) =>
   test.skip(isMobile, "desktop presentation only");
   await page.goto("/2026-poikatsu");
   const hero = page.locator(".hero");
-  await expect(hero).toHaveCSS("min-height", "450px");
+  await expect(page.locator(".breadcrumbs")).toHaveCSS("margin-bottom", "0px");
+  await expect(hero).toHaveCSS("min-height", "350px");
   await expect(hero).toHaveCSS("padding-top", "38px");
   await expect(hero).toHaveCSS("padding-bottom", "38px");
+});
+
+test("mobile hero is compact with breathing room below the poster", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "mobile presentation only");
+  await page.goto("/2026-poikatsu");
+  const hero = page.locator(".hero");
+  await expect(hero).toHaveCSS("min-height", "560px");
+  await expect(hero).toHaveCSS("padding-top", "12px");
+  await expect(hero).toHaveCSS("padding-bottom", "34px");
+  await expect(hero.locator(".hero-poster")).toHaveCSS("margin-top", "50px");
+});
+
+test("mobile regular pages omit the mascot artwork without leaving an empty hero", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "mobile presentation only");
+  await page.goto("/2026-poikatsu/testtest");
+  const hero = page.locator(".hero");
+  await expect(hero.locator(".hero-art")).toBeHidden();
+  await expect(hero).toHaveCSS("min-height", "0px");
+  await expect(hero).toHaveCSS("padding-bottom", "34px");
 });
 
 test("contents highlights the heading currently in view", async ({ page, isMobile }) => {
