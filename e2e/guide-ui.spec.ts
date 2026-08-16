@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("page tree exposes the active branch and mobile navigation opens from the header", async ({ page, isMobile }) => {
-  await page.goto("/2026-poikatsu/testtest");
+  await page.goto("/guide/2026-poikatsu/gambling");
   if (isMobile) {
     const navigation = page.locator("#mobile-page-navigation");
     await expect(navigation).not.toHaveAttribute("open", "");
@@ -9,12 +9,12 @@ test("page tree exposes the active branch and mobile navigation opens from the h
     await expect(navigation).toHaveAttribute("open", "");
     await expect(navigation).toHaveClass(/is-highlighted/);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-    await expect(navigation.getByRole("link", { name: "テスト" })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: "ギャンブルの遊び方" })).toBeVisible();
   } else {
     const sidebar = page.locator("#page-navigation");
     const navigation = sidebar.locator(".page-tree");
-    await expect(navigation.getByRole("link", { name: "ポイ活" })).toBeVisible();
-    const currentPage = navigation.getByRole("link", { name: "テスト" });
+    await expect(navigation.getByRole("link", { name: "2026 ポイ活生活鯖" })).toBeVisible();
+    const currentPage = navigation.getByRole("link", { name: "ギャンブルの遊び方" });
     await expect(currentPage).toHaveAttribute("aria-current", "page");
     const [sidebarBox, currentPageBox] = await Promise.all([sidebar.boundingBox(), currentPage.boundingBox()]);
     expect(sidebarBox).not.toBeNull();
@@ -40,7 +40,7 @@ test("mobile navigation and breadcrumbs share the hero background", async ({ pag
 
 test("desktop hero uses the compact presentation", async ({ page, isMobile }) => {
   test.skip(isMobile, "desktop presentation only");
-  await page.goto("/2026-poikatsu");
+  await page.goto("/guide/2026-poikatsu");
   const hero = page.locator(".hero");
   await expect(page.locator(".breadcrumbs")).toHaveCSS("margin-bottom", "0px");
   await expect(hero).toHaveCSS("min-height", "350px");
@@ -50,7 +50,7 @@ test("desktop hero uses the compact presentation", async ({ page, isMobile }) =>
 
 test("mobile hero is compact with breathing room below the poster", async ({ page, isMobile }) => {
   test.skip(!isMobile, "mobile presentation only");
-  await page.goto("/2026-poikatsu");
+  await page.goto("/guide/2026-poikatsu");
   const hero = page.locator(".hero");
   await expect(hero).toHaveCSS("min-height", "560px");
   await expect(hero).toHaveCSS("padding-top", "12px");
@@ -61,7 +61,7 @@ test("mobile hero is compact with breathing room below the poster", async ({ pag
 
 test("mobile regular pages omit the mascot artwork without leaving an empty hero", async ({ page, isMobile }) => {
   test.skip(!isMobile, "mobile presentation only");
-  await page.goto("/2026-poikatsu/testtest");
+  await page.goto("/guide/2026-poikatsu/gambling");
   const hero = page.locator(".hero");
   await expect(hero).not.toHaveClass(/hero-with-image/);
   await expect(hero.locator(".hero-art")).toBeHidden();
@@ -71,7 +71,7 @@ test("mobile regular pages omit the mascot artwork without leaving an empty hero
 
 test("contents highlights the heading currently in view", async ({ page, isMobile }) => {
   test.skip(isMobile, "contents sidebar is a desktop feature");
-  await page.goto("/2026-poikatsu");
+  await page.goto("/guide/2026-poikatsu");
   const links = page.locator(".heading-tree [data-heading-id]");
   test.skip(await links.count() < 2, "the current fixture needs at least two headings");
   const second = links.nth(1);
@@ -88,7 +88,7 @@ test("contents highlights the heading currently in view", async ({ page, isMobil
 });
 
 test("footer stays at the viewport bottom on short pages", async ({ page }) => {
-  await page.goto("/testtest");
+  await page.goto("/guide/kamesuta-com");
   const footer = page.locator("footer");
   await expect(footer).toBeVisible();
   const bottomGap = await footer.evaluate((element) => Math.round(window.innerHeight - element.getBoundingClientRect().bottom));
