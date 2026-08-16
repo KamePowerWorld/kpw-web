@@ -29,7 +29,7 @@ after(() => {
 test("nested routes render and non-canonical paths redirect", async () => {
   const home = await fetch(origin); const homeHtml = await home.text();
   assert.equal(home.status, 200); assert.match(homeHtml, /かめぱわぁ〜るど 遊びかたガイド/); assert.match(homeHtml, /子ページ/);
-  const page = await fetch(`${origin}/2026-poikatsu`); const pageHtml = await page.text();
+  const page = await fetch(`${origin}/guide/2026-poikatsu`); const pageHtml = await page.text();
   assert.equal(page.status, 200); assert.match(pageHtml, /2026 ポイ活生活鯖/); assert.match(pageHtml, /\/content\/2026-poikatsu\/assets\/image-2\.png/);
   assert.match(pageHtml, /srcset="[^"]+\.webp 320w/); assert.match(pageHtml, /fetchpriority="high"/);
   assert.match(pageHtml, /<link rel="preload" as="image"[^>]+imagesrcset=/);
@@ -38,19 +38,18 @@ test("nested routes render and non-canonical paths redirect", async () => {
   assert.doesNotMatch(pageHtml, /data:image\/png;base64/);
   assert.doesNotMatch(pageHtml, /クレジット|credits|eyebrow/);
   const wrongParent = await fetch(`${origin}/old-parent/2026-poikatsu?from=old`, { redirect: "manual" });
-  assert.equal(wrongParent.status, 308); assert.equal(wrongParent.headers.get("location"), "/2026-poikatsu?from=old");
-  const trailing = await fetch(`${origin}/2026-poikatsu/`, { redirect: "manual" });
-  assert.equal(trailing.status, 308); assert.equal(trailing.headers.get("location"), "/2026-poikatsu");
-  const testSource = readFileSync(`${process.env.KPW_DOCS_DIR ?? "../kpw-docs"}/pages/testtest/index.md`, "utf8");
-  const expectedTestStatus = /^draft:\s*true\s*$/m.test(testSource) ? 404 : 200;
-  assert.equal((await fetch(`${origin}/testtest`)).status, expectedTestStatus);
+  assert.equal(wrongParent.status, 308); assert.equal(wrongParent.headers.get("location"), "/guide/2026-poikatsu?from=old");
+  const trailing = await fetch(`${origin}/guide/2026-poikatsu/`, { redirect: "manual" });
+  assert.equal(trailing.status, 308); assert.equal(trailing.headers.get("location"), "/guide/2026-poikatsu");
+  assert.equal((await fetch(`${origin}/guide/server-overview`)).status, 200);
+  assert.equal((await fetch(`${origin}/guide/vc-status`)).status, 404);
   const image = await fetch(`${origin}/content/2026-poikatsu/assets/image-2.png`); assert.equal(image.status, 200); assert.match(image.headers.get("content-type") ?? "", /image\/png/);
 });
 
 test("site-wide icons and SEO metadata are published", async () => {
-  const article = await fetch(`${origin}/2026-poikatsu`);
+  const article = await fetch(`${origin}/guide/2026-poikatsu`);
   const articleHtml = await article.text();
-  assert.match(articleHtml, /<link rel="canonical" href="https:\/\/docs\.kamesuta\.com\/2026-poikatsu"/);
+  assert.match(articleHtml, /<link rel="canonical" href="https:\/\/docs\.kamesuta\.com\/guide\/2026-poikatsu"/);
   assert.match(articleHtml, /<meta property="og:type" content="article"/);
   assert.match(articleHtml, /<meta property="og:image" content="https:\/\/docs\.kamesuta\.com\/content\/2026-poikatsu\/assets\/image-1\.png"/);
   assert.match(articleHtml, /<meta name="twitter:card" content="summary_large_image"/);
@@ -65,7 +64,7 @@ test("site-wide icons and SEO metadata are published", async () => {
   assert.equal(brandLogo.headers.get("cache-control"), "public, max-age=31536000, immutable");
   assert.equal(brandLogo.headers.get("content-type"), "image/webp");
 
-  const regular = await fetch(`${origin}/testtest`);
+  const regular = await fetch(`${origin}/guide/server-overview`);
   if (regular.status === 200) {
     const regularHtml = await regular.text();
     assert.doesNotMatch(regularHtml, /<meta property="og:image"/);
@@ -76,7 +75,8 @@ test("site-wide icons and SEO metadata are published", async () => {
   const sitemapXml = await sitemap.text();
   assert.equal(sitemap.status, 200);
   assert.match(sitemap.headers.get("content-type") ?? "", /application\/xml/);
-  assert.match(sitemapXml, /https:\/\/docs\.kamesuta\.com\/2026-poikatsu/);
+  assert.match(sitemapXml, /https:\/\/docs\.kamesuta\.com\/guide\/2026-poikatsu/);
+  assert.doesNotMatch(sitemapXml, /\/guide\/vc-status/);
   assert.doesNotMatch(sitemapXml, /\/editor/);
 
   const robots = await fetch(`${origin}/robots.txt`);
