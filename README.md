@@ -61,11 +61,35 @@ GitHubユーザーのOAuth認証やPersonal Access Tokenは使用しません。
 2. `npx wrangler secret put DISCORD_CLIENT_SECRET`を実行する。
 3. `npx wrangler secret put DISCORD_BOT_TOKEN`を実行する。
 4. `npx wrangler secret put GITHUB_APP_PRIVATE_KEY`を実行し、PEM全文を登録する。
-5. `npx wrangler d1 migrations apply kpw-web-auth --remote`で未適用のD1 migrationを反映する。
-6. GitHub Organization Secretに`CLOUDFLARE_API_TOKEN`と`CLOUDFLARE_ACCOUNT_ID`を登録する。
-7. `npm run deploy`で配備する。
+5. GitHub Organization Secretに`CLOUDFLARE_API_TOKEN`と`CLOUDFLARE_ACCOUNT_ID`を登録する。
+6. `npm run deploy`で配備する。D1 migrationはCIのデプロイ直前に自動適用されます(手動なら`npx wrangler d1 migrations apply AUTH_DB --remote --config dist/server/wrangler.json`)。
 
 Cloudflare Dashboardで環境変数を管理するため、デプロイには`--keep-vars`を付けています。ローカルでは`.dev.vars.example`を`.dev.vars`へコピーして値を設定します。秘密値をリポジトリへcommitしないでください。
+
+## ステージング
+
+`wrangler.jsonc`の`env.staging`が本番と別のWorker `kpw-web-staging`(`https://kpw-web-staging.kame.workers.dev`、カスタムドメインなし)を定義します。KV・D1・環境変数・Secretはすべて本番と分離し、原稿は`kpw-docs`の`staging`ブランチを読み書きします。ステージングは`X-Robots-Tag: noindex`を返し、canonical URLは本番を指します。
+
+ブランチとデプロイ先の対応:
+
+| kpw-web | kpw-docs | デプロイ先 |
+|---|---|---|
+| `master` | `master` | 本番 `kpw-web` |
+| `staging` | `staging` | `kpw-web-staging` |
+| (`master`) | PR | `kpw-web-staging`のプレビューversion |
+
+- `kpw-web`の変更は`staging`で確認してから`master`へPRで取り込みます。
+- `kpw-docs`の`staging`は実験用で、`git push origin master:staging --force`で定期的に本番の内容へ戻します。
+- ステージングのエディターで保存すると`kpw-docs`の`staging`へcommitされ、ステージングが再デプロイされます。
+
+ステージングのKV・D1は作成済みでIDは`wrangler.jsonc`にあります。作り直す場合の手順:
+
+1. `npx wrangler kv namespace create SESSIONS --env staging`と`npx wrangler d1 create kpw-web-auth-staging`を実行し、IDを`env.staging`へ書く。
+2. Discord Developer PortalのRedirect URLに`https://kpw-web-staging.kame.workers.dev/api/auth/callback`を追加する。GitHub Appはそのまま使えます。
+3. `CLOUDFLARE_ENV=staging npm run deploy`で初回配備する。Workerが未作成の間は`wrangler secret put`が使えないため、初回は`--secrets-file`で3つのSecretを渡す。以降は`npx wrangler secret put <NAME> --env staging`で更新し、`staging`ブランチへのpushでCIが配備する。
+4. Cloudflare DashboardでWorker `kpw-web-staging`に`DISCORD_CLIENT_ID`、`DISCORD_GUILD_ID`、`DISCORD_ADMIN_ROLE_ID`、`GITHUB_APP_ID`を設定する。
+
+ローカルでステージング設定を使う場合は`CLOUDFLARE_ENV=staging npm run build && npm run preview`です。
 
 ## セキュリティ
 

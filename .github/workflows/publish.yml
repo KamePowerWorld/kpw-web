@@ -2,8 +2,15 @@ name: Publish website
 
 on:
   push:
-    branches: [master]
+    branches: [master, staging]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: production or staging
+        required: true
+        type: choice
+        options: [production, staging]
+        default: production
   workflow_call:
     inputs:
       docs-repository:
@@ -11,6 +18,15 @@ on:
         type: string
       docs-ref:
         required: true
+        type: string
+      environment:
+        description: production or staging
+        required: false
+        type: string
+        default: production
+      web-ref:
+        description: kpw-web ref to build; defaults to the branch matching the environment
+        required: false
         type: string
     secrets:
       CLOUDFLARE_API_TOKEN:
@@ -22,22 +38,50 @@ permissions:
   contents: read
 
 jobs:
-  publish:
+  resolve:
     runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      web-ref: ${{ steps.resolve.outputs.web-ref }}
+      docs-ref: ${{ steps.resolve.outputs.docs-ref }}
+    steps:
+      - id: resolve
+        shell: bash
+        run: |
+          environment="${{ inputs.environment }}"
+          if [ -z "$environment" ]; then
+            if [ "${{ github.ref_name }}" = "staging" ]; then environment=staging; else environment=production; fi
+          fi
+          if [ "$environment" = "staging" ]; then branch=staging; else branch=master; fi
+          web_ref="${{ inputs.web-ref }}"
+          docs_ref="${{ inputs.docs-ref }}"
+          {
+            echo "environment=$environment"
+            echo "web-ref=${web_ref:-$branch}"
+            echo "docs-ref=${docs_ref:-$branch}"
+          } >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.environment }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Selects the wrangler.jsonc environment at build time; empty means the top-level (production) config.
+      CLOUDFLARE_ENV: ${{ needs.resolve.outputs.environment == 'staging' && 'staging' || '' }}
     steps:
       - name: Check out website
         uses: actions/checkout@v4
         with:
           repository: KamePowerWorld/kpw-web
+          ref: ${{ needs.resolve.outputs.web-ref }}
           path: web
       - name: Check out documentation
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.docs-repository || 'KamePowerWorld/kpw-docs' }}
-          ref: ${{ inputs.docs-ref || 'master' }}
+          ref: ${{ needs.resolve.outputs.docs-ref }}
           path: docs
       - uses: actions/setup-node@v4
         with:
@@ -56,6 +100,10 @@ jobs:
         working-directory: web
         env:
           KPW_DOCS_DIR: ${{ github.workspace }}/docs
+      - name: Apply D1 migrations
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        run: npx wrangler d1 migrations apply AUTH_DB --remote --config dist/server/wrangler.json
+        working-directory: web
       - name: Deploy to Cloudflare Workers
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
         run: npx wrangler deploy --config dist/server/wrangler.json --keep-vars
