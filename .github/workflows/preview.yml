@@ -25,9 +25,13 @@ permissions:
 jobs:
   preview:
     runs-on: ubuntu-latest
+    environment: staging
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Preview versions are uploaded to the staging Worker so the editor in a preview
+      # writes to the staging D1/KV and the staging docs branch, never to production.
+      CLOUDFLARE_ENV: staging
     steps:
       - name: Check out trusted website code
         uses: actions/checkout@v4

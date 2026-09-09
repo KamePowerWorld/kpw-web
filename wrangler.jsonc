@@ -44,5 +44,38 @@
     "enabled": true,
     "logs": { "head_sampling_rate": 1 },
     "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  },
+  // Staging is selected at build time with CLOUDFLARE_ENV=staging. Bindings, routes and vars
+  // are not inherited from the top level, so every environment-specific value is repeated here.
+  "env": {
+    "staging": {
+      "name": "kpw-web-staging",
+      "secrets": {
+        "required": ["DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN", "GITHUB_APP_PRIVATE_KEY"]
+      },
+      // Served from workers.dev only; no custom domain for staging.
+      "routes": [],
+      "kv_namespaces": [
+        {
+          "binding": "SESSIONS",
+          "id": "5481660cfd76408f9e849870baefe109"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "kpw-web-auth-staging",
+          "database_id": "737a3b4c-8f83-4041-affd-e5b1dfa1c8b2",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": {
+        "KPW_ENV": "staging",
+        "GITHUB_OWNER": "KamePowerWorld",
+        "GITHUB_REPO": "kpw-docs",
+        "GITHUB_BRANCH": "staging",
+        "GITHUB_APP_SLUG": "kpw-editor"
+      }
+    }
   }
 }
